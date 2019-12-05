@@ -1,0 +1,16 @@
+Procedure, BLAST sequences 31-33, identify internal segments that seem to be mismatches, then grepl those "internal" segments against the the Zymo expected sequences.
+
+sq31, internal (main E. coli, internal Enterococcus)
+GAGTGCTAAGTGTTGGAGGGTTTCCGCCCTTCAG---T-GC-TGCAGCAAACGCATTAAGCACTC
+GAGTGCTAAGTGTTGGAGGGTTTCCGCCCTTCAGTGCTGCAGCAAACGCATTAAGCACTC
+
+sq32, internal (main Bacillus, internal E. coli)
+G--T-C---GACTT-GGAGG-TTGTGCCCTTGAGGCGTGGCTTCCGGAGCTAACGCGTTAAGTCGA-CC
+GTCGACTTGGAGGTTGTGCCCTTGAGGCGTGGCTTCCGGAGCTAACGCGTTAAGTCGACC
+
+sq33, internal (main Enterococcus, internal E. coli)
+GGCCCCCTGGAC-GAAGACTGACGCTCAGGTGCGAA
+GGCCCCCTGGACGAAGACTGACGCTCAGGTGCGAA
+
+Result, these all appear to be "trimeras" in which a short-ish internal segment from one sequences is introgressed into true sequence.
+

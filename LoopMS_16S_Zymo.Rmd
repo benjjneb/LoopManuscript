@@ -1,0 +1,257 @@
+---
+title: "Evaluationg LoopSeq 16S on Zymo Mock"
+author: "BJC"
+date: "11/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
+```{r}
+library(ShortRead, quietly=TRUE)
+library(dada2); packageVersion("dada2") # Should be 1.13.1 or later
+library(ggplot2, quietly=TRUE)
+setwd("~/LoopManuscript") # CHANGE ME to the location of this file
+path <- "~/LoopData/16S/Zymo" # CHANGE ME to the location of the fastq files
+path.fig <- "Figs" # Relative path to where figures should be saved
+path.rds <- "RDS" # Relative path to where RDS should be saved
+fn <- file.path(path, "Zymo_contig_list_trimmed.fq")
+length(getSequences(fn))
+```
+
+# Filtering and Trimming
+
+Check the complexity profile of the raw data:
+```{r}
+plotComplexity(fn)
+```
+
+No evidence of low complexity infiltrates.
+
+Inspect the quality profile of the raw data:
+```{r}
+plotQualityProfile(fn)
+```
+
+Generally very high quality. Quality a bit lower in the first ~50 nts. The big quality dropoff at >1500 nts is in a very few number of reads, and is beyond the length of the sequenced amplicon anyway, will be removed by a length filter.
+
+Enter primres, and confirm their presence and the overall orientation of the reads. Code is taken from the DADA2 ITS tutorial workflow:
+```{r}
+FWD <- "AGAGTTTGATCMTGGC" # Loop 16S forward primer
+REV <- "TACCTTGTTACGACTT" # Loop 16S reverse primer
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+    orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
+        RevComp = reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+rbind(FWD.Primer = sapply(allOrients(FWD), primerHits, fn = fn), 
+      REV.Primer = sapply(allOrients(REV), primerHits, fn = fn))
+```
+
+The FWD and REV primers are found in their expected orientations in the vast majority of the reads (~19k/21k) as expected.
+
+Remove the primers (and any flanking sequence) from the reads:
+```{r}
+nop <- file.path(path, "nop", basename(fn))
+out <- removePrimers(fn, nop, FWD, rc(REV), verbose=TRUE)
+```
+
+Review the quality profile after primer removal:
+```{r}
+plotQualityProfile(nop)
+```
+
+The low-quality long-read tail was removed, but will enforce a length window at the trimming stage to get rid of the last few too-long sequences (perhaps off-target amplification?).
+
+Filter the sequences and enforce minimum/maximum lengths appropriate for full-length 16S:
+```{r}
+filt <- file.path("filtered", basename(fn))
+track <- filterAndTrim(nop, filt, maxEE=2, minLen=1200, maxLen=1600, verbose=TRUE)
+```
+
+Final inspection of the quality profile:
+```{r}
+plotQualityProfile(filt)
+```
+
+Very clean. Lower quality at the start and ends of the reads, as is expected from Loop sequencing as there will be less coverage at the ends of the contigs, but high-quality throughout.
+
+# Denoising
+
+First let's learn the error rates:
+```{r}
+err <- learnErrors(filt, multi=TRUE, verbose=TRUE)
+plotErrors(err, nominalQ=TRUE)
+```
+
+Typically would want more data than this, especially given the seemingly very low error rates, but this is decent matching between the error model and the data. Possible improvement could be made in how the loess fitting is working at the highQ tail, which probably is driven by the weighted fitting and the very high fraction of maximum quality scores.
+
+Denoise the filtered data into ASVs:
+```{r}
+dd <- dada(filt, err, DETECT_SINGLETONS=TRUE, multi=TRUE)
+dd
+```
+
+Assign taxonomy:
+```{r}
+tax <- assignTaxonomy(dd, "~/tax/silva_nr_v132_train_set.fa.gz", minBoot=80)
+unname(tax)
+```
+
+Only expecting 27 sequences, let's look at the clustering stats:
+```{r}
+dd$clustering[,-1]
+```
+
+And BLAST those singletons that make up the additional unexpected ASVs:
+```{r}
+## dada2:::pfasta(getSequences(dd)[28:33])
+```
+
+sq28 is a chimera. (Should do a full chimera evaluation here as well, basically isBimera of all the reads against the known true 27 seqs.) In blast sq29/30 also look chimeric. The others have stretches of differences but not clearly at start/end.
+
+```{r}
+unname(cbind(isBimeraDenovo(dd), isBimeraDenovo(dd, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd, minFoldParentOverAbundance=4.5, allowOneOff=TRUE)))
+```
+
+Yeah, so pretty strong evidence for 28-30 as chimeras. 31-33 unclear what they are just yet... but upon further inspection (see `Docs/Zymo_ExtraSeqs_Introgressino.txt`) they all appear to be chimeras as well, or more specifically they are sequences in which a short-ish (<100nt) segment of one ASV is introgressed into another ASV, rather than the canonical "bimera" combination of the left- and right- halves of two different ASVs.
+
+I think I'll call it here for now, but digging even deeper may be warranted depending on final parameter recomendations, in which case the following is a start:
+```{r}
+dd10 <- dada(filt, err, DETECT_SINGLETONS=TRUE, OMEGA_A = 1e-10, multi=TRUE)
+dd10 # 45 ASVs
+sq10 <- getSequences(dd10); names(sq10) <- paste0("Seq", seq_along(sq10))
+sq10 <- sq10[!sq10 %in% getSequences(dd)]
+foo <- cbind(isBimeraDenovo(dd10), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5, allowOneOff=TRUE))[sq10,]
+rownames(foo) <- names(sq10)
+foo
+```
+
+So additional sequences contain at least 3 chimeras identified by standard methods...
+
+```{r}
+##dada2:::pfasta(sq10, id=names(sq10))
+```
+
+From BLAST against nt, the results look like...
+
+Sq34: A short-ish introgression (~50nts?)
+Sq35: Introgression, plus a couple of mismatches at the beginning?
+Sq36: Mismatches all over
+Sq37: Query coverage starts at nt82
+Sq38: Chimera
+Sq39: Chimera
+Sq40: Maybe short introgression?
+Sq41: Dunmno
+Sq42: Seems like chimera
+Sq43: Introgression
+Sq44: Chimera (very low birth Qave < 20)
+Sq45: Introgression
+
+Also the birth_qave results for these sequences are generally low, a lot of 20s, whereas that's not true for any of the real sequences.
+
+*Should consider deep chimera inspection at the raw (well, filtered) read level, but should poke into above first, and will need a way to identify these introgressions in addition to standard bimeras*
+
+## Evaluate Accuracy
+
+For now just going to assert that 28-33 are chimeras based on the accumulated evidence, which includes BLAST and inspection.
+```{r}
+bim <- rep(c(FALSE, TRUE), times=c(27,6))
+st <- makeSequenceTable(dd)[,!bim,drop=FALSE]
+tt <- tax[!bim,]
+tt[tt[,6] ==  "Escherichia/Shigella",6] <- "Escherichia"
+```
+
+Now let's make the same plot from the PacBio paper inspecting the distribution of ASVs for each species in the mixture:
+```{r}
+theme_set(theme_bw())
+genusPalette <- c(Bacillus="#e41a1c", Enterococcus="#377eb8", Escherichia="#4daf4a", Lactobacillus="#984ea3",
+                  Listeria="#ff7f00", Pseudomonas="#ffff33", Salmonella="#a65628", Staphylococcus="#f781bf")
+ncopy <- c("Pseudomonas"=4, "Escherichia"=7, "Salmonella"=7, "Lactobacillus"=5, 
+           "Enterococcus"=4, "Staphylococcus"=6, "Listeria"=6, "Bacillus"=10)
+abund.ome <- sapply(names(ncopy), function(gen) {
+  is.gen <- grepl(gen, tax[,"Genus"])
+  sum(dd$denoised[is.gen])/ncopy[gen]
+})
+names(abund.ome) <- names(ncopy)
+dfgen <- data.frame(Genus=names(ncopy), Abundance=abund.ome, stringsAsFactors = FALSE)
+ggplot(data=dfgen, aes(x=Genus, y=Abundance)) + 
+  geom_col(width=0.4, aes(fill=Genus)) + scale_fill_manual(values=genusPalette) +
+  ylim(c(0, NA)) + geom_hline(yintercept=mean(abund.ome), linetype="dashed") +
+  theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) +
+  ylab("Genome Abundance")
+# Similar profile to PB data, although again remember this is a different batch
+dfasv <- data.frame(Genus=tt[,"Genus"], Abundance=st[1,], stringsAsFactors = FALSE)
+rownames(dfasv) <- NULL
+ggplot(data=dfasv, aes(x=Genus, y=Abundance)) + 
+  geom_point(aes(color=Genus), shape="x", size=4) + scale_color_manual(values=genusPalette) +
+  ylim(c(0, NA)) +
+  theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) +
+  ylab("ASV Abundance")
+# Looks similar, only 1 Entero ASV in this data for whatever reason though
+dfasv$ScaledAbundance <- dfasv$Abundance/abund.ome[dfasv$Genus]
+# Number the ASVs in each strain/genus
+dfasv$Variant <- sapply(seq(nrow(dfasv)), function(i) sum(dfasv$Genus[1:i] == dfasv$Genus[[i]], na.rm=TRUE))
+p.stoich <- ggplot(data=dfasv, aes(x=Variant, y=ScaledAbundance, fill=Genus, width=0.5)) + geom_col() + 
+  scale_fill_manual(values=genusPalette) +
+  facet_wrap(~Genus, nrow=2) +
+  scale_y_continuous(breaks=seq(0,round(max(dfasv$ScaledAbundance))), minor_breaks=NULL) +
+  theme(panel.grid.major.y=element_line(color="grey60", size=0.2)) +
+  theme(panel.grid.major.x=element_blank(), panel.grid.minor.x=element_blank()) +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+  xlab("Full-length 16S Sequence Variants") + 
+  ylab("Abundance (per-genome)") + 
+  guides(fill=FALSE)
+p.stoich
+##ggsave("~/Desktop/ZymoDADA2ASVs_Loop.pdf", p.stoich, width=8, height=5, units="in", useDingbats=FALSE)
+```
+
+Just as pretty as the PacBio version. *Do I need to modify this so it doesn't so completely copy the PacBio version if it will be a publication figures? I'm not exactly sure what the rules are given that the underlying data is completely different. It's nice to be able to easily visually compare the two figures.*
+
+How many reads are completely error free (after filtering)?
+```{r}
+drp.filt <- derepFastq(filt)
+sum(drp.filt$uniques[getSequences(st)])/sum(drp.filt$uniques)
+```
+
+That is pretty remarkable, 94.5% of all reads were without any errors! (after filtering)
+
+Now identify any contaminants in the (filtered) reads, to exclude them before calculating and visualizing the error distribution over positions an quality scores:
+```{r}
+##tax.filt <- assignTaxonomy(drp.filt, "~/tax/silva_nr_v132_train_set.fa.gz", multi=TRUE)
+##saveRDS(tax.filt, file.path(path.rds, "Zymo16S_tax_filt.rds"))
+tax.filt <- readRDS(file.path(path.rds, "Zymo16S_tax_filt.rds"))
+if(!identical(getSequences(drp.filt), getSequences(tax.filt))) stop("Broken tax.filt.") # Must be TRUE
+table(tax.filt[,"Genus"], useNA="always")
+```
+
+Everything is assigned to the expected genera. No contaminants.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

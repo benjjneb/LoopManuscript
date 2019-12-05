@@ -1,0 +1,262 @@
+---
+title: "Loop_Callahan16S"
+author: "BJC"
+date: "11/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+Load libraries, set the working directory to the location of this file (only necessary when running by hand), and read in filenames:
+```{r}
+library(dada2); packageVersion("dada2") # Should be 1.13.1 or later
+library(ggplot2)
+setwd("~/Desktop/LoopSeq/16S_Callahan") # Set to location of this file
+path <- "190909_Callahan_16S_output/fastq" # Path to fastq files
+fn <- list.files(path, pattern="contig_list_trimmed.fq", full.names=TRUE)
+```
+
+List files:
+```{r}
+basename(fn)
+```
+
+## Basic characterization of raw fastq data
+
+Dereplicate and number of reads and unique sequences in each file:
+```{r}
+drp <- derepFastq(fn, verbose=FALSE)
+sam <- sapply(strsplit(basename(fn), "_"), `[`, 1)
+```
+
+```{r}
+nunq <- Vectorize(function(x) length(getUniques(x)))
+nread <- Vectorize(function(x) sum(getUniques(x)))
+data.frame(row.names=sam, Reads=nread(drp), Uniques=nunq(drp))
+```
+
+High ratio of uniques to reads (>1/2), but remember this is before cutting down to the sequence region.
+
+Distribution of read lengths:
+```{r}
+unq.seqlens <- function(x) {
+  rep(nchar(getSequences(x)), times=x$uniques)
+}
+lendf <- data.frame(Sample=rep(sam, times=nread(drp)), Length=unlist(lapply(drp, unq.seqlens)))
+ggplot(data=lendf, aes(x=Length)) + geom_histogram(bins=100) + facet_wrap(~Sample)
+```
+
+A nice clear peak at the expected length of ~1500 nts. There is a flat and low count short-length tail in most samples, but quite a bit more of these short-length reads in R3.1 in particular.
+
+Look at the quality profiles:
+```{r}
+plotQualityProfile(fn)
+```
+
+Qualities are generally very good, 35+ on average, all the way through the 1.5Kb target length.
+
+## Remove primers and Quality filtering
+
+Define the 16S primers and remove them:
+```{r}
+FWD <- "AGAGTTTGATCMTGGC" # forward primer sequence w/ ambig nts specified by IUPAC code
+REV <- "TACCTTGTTACGACTT" # reverse primer sequence ...
+```
+
+```{r}
+nop <- file.path("noprimers", basename(fn)) # write out primer-free fastq to noprimers/ subdirectory
+out <- removePrimers(fn, nop, FWD, rc(REV))
+out
+```
+
+*Note to self: This is pretty slow... takes ~15 minutes. Should look at speeding this function up in the future.*
+Major loss of reads here, over half. Some of this is clearly explained by the short and off-length reads (see the big drop in R3.1 that had that fat short-read tail) but it still seems on the high side. Let's see if a less-stringent primer matching will help.
+
+First try allowing more mismatches than the default of 2:
+```{r}
+nop.4 <- file.path("noprimers_4", basename(fn)) # write out primer-free fastq to noprimers/ subdirectory
+out.m4 <- removePrimers(fn, nop.4, FWD, rc(REV), max.mismatch=4)
+out.m4
+```
+
+No meaningful improvement in read count making it through with the increase `max.mismatch`.
+
+Now look at allowing indels (note, this is currently ~4x slower than when indles aren't allowed!):
+```{r}
+nop.ai <- file.path("noprimers_ai", basename(fn)) # write out primer-free fastq to noprimers/ subdirectory
+out.ai <- removePrimers(fn, nop.ai, FWD, rc(REV), allow.indels=TRUE)
+out.ai
+```
+
+No significant change. This is something to revisit perhaps, but for now I'm just accepting that there is a large dropoff between the number of output reads and the ones passing the screen for containing both primers.
+*Follow up with Tuval on this point*
+*How many reads are being re-oriented, any?*
+*Continuing with default*
+
+Let's take a look at the quality profiles for the primer-free qualified reads:
+```{r}
+plotQualityProfile(nop[1:3])
+```
+
+Quality looks quite good, but still some over-long reads that have remained past the primer screen, albeit quite few.
+
+Filter the reads:
+```{r}
+filt <- file.path("filtered", basename(fn)) # write out filted+primer-free fastq to filtered/ subdirectory
+track <- filterAndTrim(nop, filt, maxEE=2, minLen=1200, maxLen=1600) 
+cbind(raw=out[,1], noprimers=out[,2], filtered=track[,2])
+```
+
+Aroung 97\% of the reads are passing filtering, so very little lost at that step. Let's take a last look at the quality profiles post filtering:
+
+````{r}
+plotQualityProfile(filt[1:3])
+```
+
+Clearly declining quality scores towards the ends of the read, even accounting for the questionable long-read tail. I don't entirely understand that actually...
+*Follow up with Tuval on this*
+
+## Learn Error Rates
+
+First learn the error rates on default settings:
+```{r}
+err <- learnErrors(filt, multi=TRUE, verbose=TRUE) # Probably the longest running part
+plotErrors(err, nominalQ=TRUE)
+```
+
+This looks very smooth, and I suppose it is quite in line with the nominal definition of the Q value as well. Not seeing much cause for concern here at all. I could consider revisiting this later with DETECT_SINGLETONS, but doesn't seem necessary at this point.
+
+```{r}
+dada2:::checkConvergence(err)
+```
+
+Mildly interesting, big drop to near converence at step 5, then convergence at step 6.
+
+## Dereplicate and Denoise
+
+Dereplicate:
+```{r}
+drp <- derepFastq(filt)
+names(drp) <- sam
+data.frame(Sample=sam, Uniques=nunq(drp), Reads=nread(drp))
+```
+
+About 5-6x more reads than uniques. Looks high quality, lots of replication.
+
+Denoise with default settings:
+```{r}
+dd <- dada(drp, err, multi=TRUE, verbose=FALSE)
+sta <- makeSequenceTable(dd)
+st <- removeBimeraDenovo(sta, minFoldParentOverAbundance=4.5, multi=TRUE, verbose=TRUE)
+sum(st)/sum(sta)
+```
+
+Denoise with OMEGA_A=1e-10:
+```{r}
+dd.10 <- dada(drp, err, OMEGA_A=1e-10, multi=TRUE, verbose=FALSE)
+sta.10 <- makeSequenceTable(dd.10)
+st.10 <- removeBimeraDenovo(sta.10, minFoldParentOverAbundance=4.5, multi=TRUE, verbose=TRUE)
+sum(st.10)/sum(sta.10)
+```
+
+Denoise with pseudo-pooling:
+```{r}
+dd.pp <- dada(drp, err, pool="pseudo", multi=TRUE, verbose=FALSE)
+sta.pp <- makeSequenceTable(dd.pp)
+st.pp <- removeBimeraDenovo(sta.pp, minFoldParentOverAbundance=4.5, multi=TRUE, verbose=TRUE)
+sum(st.pp)/sum(sta.pp)
+```
+
+Denoise with DETECT_SINGLETONS:
+```{r}
+dd.ds <- dada(drp, err, DETECT_SINGLETONS=TRUE, multi=TRUE, verbose=FALSE)
+sta.ds <- makeSequenceTable(dd.ds)
+st.ds <- removeBimeraDenovo(sta.ds, minFoldParentOverAbundance=4.5, multi=TRUE, verbose=TRUE)
+sum(st.ds)/sum(sta.ds)
+```
+
+Let's start by looking at the spectrum of p-values with OMEGA_A = 1e-10:
+```{r}
+dd.10[[1]]$clustering$birth_pval
+```
+
+No obvious break anywhere, what do those ASVs associated with more marginal p-values look like?
+```{r}
+dd.10[[1]]$clustering[131:160,-1]
+```
+
+Some evidence of some low-quality-score partitions, and its all mostly low-hamming values as well, a max of birth_ham 9. Do these sequnces appear in other samples? (should look at the R9.3 and R9.4 samples instead):
+```{R}
+plot(log10(dd.10[["R9.3"]]$clustering$birth_pval))
+```
+
+```{r}
+dd.10[["R9.3"]]$clustering[481:510,-1]
+```
+
+Replications in R9.4:
+```{r}
+in.both.3 <- dd.10[["R9.3"]]$sequence %in% dd.10[["R9.4"]]$sequence
+in.both.4 <- dd.10[["R9.4"]]$sequence %in% dd.10[["R9.3"]]$sequence
+plot(in.both.3)
+plot(in.both.4)
+movwind <- function(x, size) {
+  sapply(seq(length(x)-size+1), function(i) mean(x[i:(i+size-1)]))
+}
+plot(movwind(in.both.3,25))
+plot(movwind(in.both.4,25))
+```
+
+BLAST some of them:
+```{r}
+dada2:::pfasta(dd.10[["R9.3"]]$sequence[451:460])
+```
+
+One exact match, but the others all have one to a few mismatches or an indel. Not surprising.
+
+```{r}
+dd.10[["R9.3"]]$clustering[451:460,-1]
+dd.10[["R9.3"]]$sequence[451:460] %in% getSequences(sta.10) # ALL TRUE
+```
+
+```{r}
+sum(drp$R9.3$uniques)
+sum(drp$R9.3$uniques[dd$R9.3$sequence])
+sum(drp$R9.3$uniques[dd.10$R9.3$sequence])
+sum(drp$R9.3$uniques[dd.pp$R9.3$sequence])
+sum(drp$R9.3$uniques[dd.ds$R9.3$sequence])
+```
+
+The denoising identifies ~70-80% of the reads as error-free. But, the other analysis suggested 90%+ of the reads were error free? That was in a much simpler community of course, but not sure if it should be different here, but rather just reflects the more difficult inference problem.
+
+```{r}
+ham1 <- dada2:::bs1ham(dd.10$R9.3)
+table(round(ham1$pos/100))
+table(paste0(ham1$ref, ham1$sub))
+```
+
+Very strong skew towards transitions (AG, GA, CT, TC). Those are more biologically common I believe, although how about in 16S rRNA? Also some clear hot spots location-wise, but not at the very beginnings or ends which are the most common error positions in LoopSeq (albeit predicted fairly well by Q scores).
+
+How can I map these differences onto what we know about the 16S rrna structure and conservation patterns? What are the biological expectations for things like transitions/transversions? Is there any evidence for paired substitutions that might preserve complementation?
+
+```{r}
+foo <- dada2:::bs1ham(dd.10$R9.3, ham=2)
+bar <- cbind(foo[!duplicated(foo$clust),], foo[duplicated(foo$clust),])
+colnames(bar) <- c(paste0(colnames(foo), "1"), paste0(colnames(foo), "2"))
+table(paste(paste0(bar$ref1, bar$sub1), paste0(bar$ref2, bar$sub2), sep="-"))
+bar100 <- bar[abs(bar$pos1 - bar$pos2) < 100,]
+table(paste(paste0(bar100$ref1, bar100$sub1), paste0(bar100$ref2, bar100$sub2), sep="-"))
+```
+
+Nothing obvious there, although this is a very crude comparison.
+
+
+
+
+
+
+
