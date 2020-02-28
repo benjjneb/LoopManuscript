@@ -5,20 +5,16 @@ date: "11/6/2019"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 ## Setup
 
 Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
-```{r}
-library(ShortRead, quietly=TRUE)
+```{r, echo=FALSE}
 library(dada2); packageVersion("dada2") # Should be 1.13.1 or later
+library(ShortRead, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
 setwd("~/LoopManuscript") # CHANGE ME to the location of this file
 path <- "~/LoopData/16S/Zymo" # CHANGE ME to the location of the fastq files
-path.fig <- "Figs" # Relative path to where figures should be saved
+path.fig <- "Figures" # Relative path to where figures should be saved
 path.rds <- "RDS" # Relative path to where RDS should be saved
 fn <- file.path(path, "Zymo_contig_list_trimmed.fq")
 length(getSequences(fn))
@@ -31,23 +27,23 @@ Check the complexity profile of the raw data:
 plotComplexity(fn)
 ```
 
-No evidence of low complexity infiltrates.
+No evidence of any low complexity sequence issues.
 
 Inspect the quality profile of the raw data:
-```{r}
+```{r, warning=FALSE, message=FALSE}
 plotQualityProfile(fn)
 ```
 
-Generally very high quality. Quality a bit lower in the first ~50 nts. The big quality dropoff at >1500 nts is in a very few number of reads, and is beyond the length of the sequenced amplicon anyway, will be removed by a length filter.
+Generally very high quality. Quality a bit lower in the first ~50 nts. The big quality dropoff at >1500 nts is driven by a small number of reads with extended lengths, and is beyond the length of the sequenced amplicon anyway. That should be almost entirely removed by a length filter.
 
-Enter primres, and confirm their presence and the overall orientation of the reads. Code is taken from the DADA2 ITS tutorial workflow:
+Enter primers, and confirm their presence and the overall orientation of the reads. Code is adapated from [the DADA2 ITS tutorial workflow](https://benjjneb.github.io/dada2/ITS_workflow.html#identify-primers):
 ```{r}
 FWD <- "AGAGTTTGATCMTGGC" # Loop 16S forward primer
 REV <- "TACCTTGTTACGACTT" # Loop 16S reverse primer
 allOrients <- function(primer) {
     # Create all orientations of the input sequence
     require(Biostrings)
-    dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+    dna <- DNAString(primer)
     orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
         RevComp = reverseComplement(dna))
     return(sapply(orients, toString))  # Convert back to character vector
@@ -69,119 +65,88 @@ nop <- file.path(path, "nop", basename(fn))
 out <- removePrimers(fn, nop, FWD, rc(REV), verbose=TRUE)
 ```
 
+Almost none are being reverse-complemented. The assembly step in the Loop contig construction workflow already orients the reads in a consistent direction.
+
 Review the quality profile after primer removal:
-```{r}
+```{r, message=FALSE}
 plotQualityProfile(nop)
 ```
 
-The low-quality long-read tail was removed, but will enforce a length window at the trimming stage to get rid of the last few too-long sequences (perhaps off-target amplification?).
+The low-quality long-read tail was removed, but it still appears worthwhile to enforce a length window at the trimming stage to get rid of the last few too-long sequences.
 
 Filter the sequences and enforce minimum/maximum lengths appropriate for full-length 16S:
 ```{r}
 filt <- file.path("filtered", basename(fn))
-track <- filterAndTrim(nop, filt, maxEE=2, minLen=1200, maxLen=1600, verbose=TRUE)
+track <- filterAndTrim(nop, filt, maxEE=2, minLen=1400, maxLen=1600, verbose=TRUE)
 ```
 
 Final inspection of the quality profile:
-```{r}
+```{r, message=FALSE}
 plotQualityProfile(filt)
 ```
 
 Very clean. Lower quality at the start and ends of the reads, as is expected from Loop sequencing as there will be less coverage at the ends of the contigs, but high-quality throughout.
 
+# Scan for contaminants in filtered reads
+
+We'll do a simple scan for potential contaminants in the filtered unique sequences by assigning them taxonomy, and attributing any sequences assigned to genera outside those expected as potential contaminants:
+```{r}
+tax.filt.rds <- file.path(path.rds, "tax_filt.rds") # RDS save/load to speed up reruns of the code
+if(!file.exists(tax.filt.rds)) {
+  tax.filt <- assignTaxonomy(drp.filt, "~/tax/silva_nr_v132_train_set.fa.gz", minBoot=80, multi=TRUE)
+  saveRDS(tax.filt, tax.filt.rds)
+}
+tax.filt <- readRDS(tax.filt.rds)
+if(!identical(getSequences(tax.filt), getSequences(drp.filt))) stop("Taxonomy mismatch.")
+table(tax.filt[,"Genus"], useNA="ifany")
+```
+
+Everything is in the expected genera, except for a single `NA`. Taking a closer look at that with BLAST against nt:
+```{r}
+dada2:::pfasta(getSequences(drp.filt)[is.na(tax.filt[,"Genus"])])
+```
+
+Not a contaminant, looks like a chimera of some sort. We conclude here that there are no contaminants present in the filtered data.
+
 # Denoising
 
-First let's learn the error rates:
-```{r}
-err <- learnErrors(filt, multi=TRUE, verbose=TRUE)
+Learn the error rates:
+```{r, warning=FALSE}
+err <- learnErrors(filt, multi=TRUE, verbose=0)
 plotErrors(err, nominalQ=TRUE)
 ```
 
-Typically would want more data than this, especially given the seemingly very low error rates, but this is decent matching between the error model and the data. Possible improvement could be made in how the loess fitting is working at the highQ tail, which probably is driven by the weighted fitting and the very high fraction of maximum quality scores.
+It would be preferable to have more data than this, especially given the seemingly very low error rates, but this is decent matching between the error model and the data. Possible improvements to the DADA2 loess error model fitting could be made in how it is working at the highQ tail, where the slightly degraded fitting is probably driven by the interaction between weighted fitting and the very high fraction of maximum quality scores.
 
-Denoise the filtered data into ASVs:
+# Accuracy of DADA2 ASVs on Zymo mock community
+
+Denoise the filtered data into ASVs, using current DADA2 defaults, except for `OMEGA_C=0` to correct all reads (for the purpose of identifying all errors later one):
 ```{r}
-dd <- dada(filt, err, DETECT_SINGLETONS=TRUE, multi=TRUE)
+dd <- dada(filt, err, multi=TRUE, OMEGA_C=0)
 dd
 ```
 
 Assign taxonomy:
 ```{r}
-tax <- assignTaxonomy(dd, "~/tax/silva_nr_v132_train_set.fa.gz", minBoot=80)
-unname(tax)
+tax <- tax.filt[getSequences(dd),]
+if(!identical(getSequences(tax), getSequences(dd))) stop("Taxonomy mismatch.")
+table(tax[,"Genus"], useNA="ifany")
 ```
 
-Only expecting 27 sequences, let's look at the clustering stats:
-```{r}
-dd$clustering[,-1]
-```
+All are from the expected genera of the Zymo mock community.
 
-And BLAST those singletons that make up the additional unexpected ASVs:
-```{r}
-## dada2:::pfasta(getSequences(dd)[28:33])
-```
-
-sq28 is a chimera. (Should do a full chimera evaluation here as well, basically isBimera of all the reads against the known true 27 seqs.) In blast sq29/30 also look chimeric. The others have stretches of differences but not clearly at start/end.
-
-```{r}
-unname(cbind(isBimeraDenovo(dd), isBimeraDenovo(dd, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd, minFoldParentOverAbundance=4.5, allowOneOff=TRUE)))
-```
-
-Yeah, so pretty strong evidence for 28-30 as chimeras. 31-33 unclear what they are just yet... but upon further inspection (see `Docs/Zymo_ExtraSeqs_Introgressino.txt`) they all appear to be chimeras as well, or more specifically they are sequences in which a short-ish (<100nt) segment of one ASV is introgressed into another ASV, rather than the canonical "bimera" combination of the left- and right- halves of two different ASVs.
-
-I think I'll call it here for now, but digging even deeper may be warranted depending on final parameter recomendations, in which case the following is a start:
-```{r}
-dd10 <- dada(filt, err, DETECT_SINGLETONS=TRUE, OMEGA_A = 1e-10, multi=TRUE)
-dd10 # 45 ASVs
-sq10 <- getSequences(dd10); names(sq10) <- paste0("Seq", seq_along(sq10))
-sq10 <- sq10[!sq10 %in% getSequences(dd)]
-foo <- cbind(isBimeraDenovo(dd10), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5, allowOneOff=TRUE))[sq10,]
-rownames(foo) <- names(sq10)
-foo
-```
-
-So additional sequences contain at least 3 chimeras identified by standard methods...
-
-```{r}
-##dada2:::pfasta(sq10, id=names(sq10))
-```
-
-From BLAST against nt, the results look like...
-
-Sq34: A short-ish introgression (~50nts?)
-Sq35: Introgression, plus a couple of mismatches at the beginning?
-Sq36: Mismatches all over
-Sq37: Query coverage starts at nt82
-Sq38: Chimera
-Sq39: Chimera
-Sq40: Maybe short introgression?
-Sq41: Dunmno
-Sq42: Seems like chimera
-Sq43: Introgression
-Sq44: Chimera (very low birth Qave < 20)
-Sq45: Introgression
-
-Also the birth_qave results for these sequences are generally low, a lot of 20s, whereas that's not true for any of the real sequences.
-
-*Should consider deep chimera inspection at the raw (well, filtered) read level, but should poke into above first, and will need a way to identify these introgressions in addition to standard bimeras*
-
-## Evaluate Accuracy
-
-For now just going to assert that 28-33 are chimeras based on the accumulated evidence, which includes BLAST and inspection.
-```{r}
-bim <- rep(c(FALSE, TRUE), times=c(27,6))
-st <- makeSequenceTable(dd)[,!bim,drop=FALSE]
-tt <- tax[!bim,]
-tt[tt[,6] ==  "Escherichia/Shigella",6] <- "Escherichia"
-```
-
-Now let's make the same plot from the PacBio paper inspecting the distribution of ASVs for each species in the mixture:
+Create barplot of ASVs genome-scaled abundances by genus. *Note: code in this section is slightly modified from that used in Callahan et al, NAR, 2019 on PacBio full-length 16S sequencing.*
 ```{r}
 theme_set(theme_bw())
 genusPalette <- c(Bacillus="#e41a1c", Enterococcus="#377eb8", Escherichia="#4daf4a", Lactobacillus="#984ea3",
                   Listeria="#ff7f00", Pseudomonas="#ffff33", Salmonella="#a65628", Staphylococcus="#f781bf")
 ncopy <- c("Pseudomonas"=4, "Escherichia"=7, "Salmonella"=7, "Lactobacillus"=5, 
            "Enterococcus"=4, "Staphylococcus"=6, "Listeria"=6, "Bacillus"=10)
+
+st <- makeSequenceTable(dd)
+tt <- tax
+tt[tt[,6] ==  "Escherichia/Shigella",6] <- "Escherichia"
+
 abund.ome <- sapply(names(ncopy), function(gen) {
   is.gen <- grepl(gen, tax[,"Genus"])
   sum(dd$denoised[is.gen])/ncopy[gen]
@@ -201,7 +166,7 @@ ggplot(data=dfasv, aes(x=Genus, y=Abundance)) +
   ylim(c(0, NA)) +
   theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) +
   ylab("ASV Abundance")
-# Looks similar, only 1 Entero ASV in this data for whatever reason though
+# Looks similar, with some differences related to the different strains in this batch versus the original batch
 dfasv$ScaledAbundance <- dfasv$Abundance/abund.ome[dfasv$Genus]
 # Number the ASVs in each strain/genus
 dfasv$Variant <- sapply(seq(nrow(dfasv)), function(i) sum(dfasv$Genus[1:i] == dfasv$Genus[[i]], na.rm=TRUE))
@@ -216,29 +181,429 @@ p.stoich <- ggplot(data=dfasv, aes(x=Variant, y=ScaledAbundance, fill=Genus, wid
   ylab("Abundance (per-genome)") + 
   guides(fill=FALSE)
 p.stoich
-##ggsave("~/Desktop/ZymoDADA2ASVs_Loop.pdf", p.stoich, width=8, height=5, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "ZymoASVs_Loop_DADA2Defaults.pdf"), p.stoich, width=8, height=5, units="in", useDingbats=FALSE)
 ```
 
-Just as pretty as the PacBio version. *Do I need to modify this so it doesn't so completely copy the PacBio version if it will be a publication figures? I'm not exactly sure what the rules are given that the underlying data is completely different. It's nice to be able to easily visually compare the two figures.*
+Just as we saw in the PacBio profiling of the Zymo mock community (NOTE: The PacBio profilling was on a different older batch of this mock community, and several strains were switched between that batch and the newer batch profiled here), the different 16S alleles occur in the integral values consistent with intra-genomic allelic variation between the expected number of 16S copies in each of these genomes. There are no errors in the denoised data.
 
-How many reads are completely error free (after filtering)?
+*Q for myself: Do I need to modify this so it doesn't so completely copy the visual style of the PacBio version if it will be a publication figures? I'm not exactly sure what the rules are given that the underlying data is completely different. Keeping the visual style the same makes it esaier to easily visually compare the two figures, which is nice.*
+
+How many reads are completely error free? Consider reads before and after quality filtering and length screening, but note that both sets of reads are the subset of the raw reads that passed through the primer detection removal step.
 ```{r}
+drp.nop <- derepFastq(nop)
 drp.filt <- derepFastq(filt)
-sum(drp.filt$uniques[getSequences(st)])/sum(drp.filt$uniques)
+tableCorrect <- function(query.unqs, ref.seqs) {
+  is.correct <- getSequences(query.unqs) %in% getSequences(ref.seqs)
+  c(Correct=sum(getUniques(query.unqs)[is.correct]),
+    Incorrect=sum(getUniques(query.unqs)[!is.correct]))
+}
+cat("Primers detected and removed, but no filtering.\n")
+tab.nop <- tableCorrect(drp.nop, dd)
+tab.nop
+tab.nop/sum(tab.nop)
+cat("\nFiltered and length-selected.\n")
+tab.filt <- tableCorrect(drp.filt, dd)
+tab.filt
+tab.filt/sum(tab.filt)
+cat("\nReads removed during filtering and length-selection.\n")
+tab.filtered_out <- tableCorrect(drp.nop, dd) - tableCorrect(drp.filt, dd)
+tab.filtered_out
+tab.filtered_out/sum(tab.filtered_out)
 ```
 
-That is pretty remarkable, 94.5% of all reads were without any errors! (after filtering)
+That is pretty remarkable, 94.6% of all reads were without any errors! (after filtering). Furthermore, filtering and length selecting were highly accurate. 98% of the reads removed by filtering/length removal had errors, which is remarkable given the starting pool was highly enriched in correct sequences. Some accuracy stats:
 
-Now identify any contaminants in the (filtered) reads, to exclude them before calculating and visualizing the error distribution over positions an quality scores:
 ```{r}
-##tax.filt <- assignTaxonomy(drp.filt, "~/tax/silva_nr_v132_train_set.fa.gz", multi=TRUE)
-##saveRDS(tax.filt, file.path(path.rds, "Zymo16S_tax_filt.rds"))
-tax.filt <- readRDS(file.path(path.rds, "Zymo16S_tax_filt.rds"))
-if(!identical(getSequences(drp.filt), getSequences(tax.filt))) stop("Broken tax.filt.") # Must be TRUE
-table(tax.filt[,"Genus"], useNA="always")
+# Note "Incorrect" are the "correct" true positives here, as they are errors that were caught by the filter
+filt.sens <- tab.filtered_out["Incorrect"]/tab.nop["Incorrect"]
+filt.spec <- tab.filtered_out["Correct"]/tab.nop["Correct"]
+filt.prec <- tab.filtered_out["Incorrect"]/sum(tab.filtered_out)
+filt.F1 <- 2*filt.prec*filt.sens/(filt.prec+filt.sens)
+cat("Filtering (Defaults) Accuracy Stats\n", 
+    "\tSensitivity:", filt.sens, "\n\tSpecificity:", filt.spec,
+    "\n\tPrecision:", filt.prec, "\n\tF1 score:", filt.F1, "\n")
 ```
 
-Everything is assigned to the expected genera. No contaminants.
+Highly specific filter. Return to this, as it could probably be even better. This is using the default reocmmendation of `maxEE=2`. What is the best threshold for Loop data?
+
+# Accuracy of (default) filtered reads on Zymo mock community, by error type, position and quality score
+
+Define functions to identify and collate errors by type, position and quality score:
+```{r}
+library(Biostrings)
+get.diffs <- function(query, ref, vec=TRUE, ...) {
+  al <- nwalign(query, ref, vec=vec, ...)
+  cstr <- compareStrings(al[[1]], al[[2]])
+  cstr.ref <- gsub("[+]", "", cstr) # Ref coordinates, but lose insertion info
+  cstr.q <- gsub("[-]", "", cstr) # Query coordinates, but lose deletion info
+  cstr.ins <- gsub("[+]+", "+", cstr) # Reduce all multi-base inserts to a single insert
+  cstr.del <- gsub("[-]+", "-", cstr) # Reduce all multi-base deletions to a single deletion
+  refpos.sub <- unlist(gregexpr(pattern='[?]', cstr.ref))
+  refpos.del <- unlist(gregexpr(pattern='[-]+', cstr.ref)) # Just getting loc of first deleted base of multi-nt deletions
+  refpos.ins <- unlist(gregexpr(pattern='[+]', cstr.ins))
+  refpos.ins <- refpos.ins - seq_along(refpos.ins) + 1 # Correct back to ref coords
+  qpos.sub <- unlist(gregexpr(pattern='[?]', cstr.q))
+  qpos.ins <- unlist(gregexpr(pattern='[+]+', cstr.q)) # Just getting loc of first inserted base of multi-nt inserts
+  qpos.del <- unlist(gregexpr(pattern='[-]', cstr.del))
+  qpos.del <- qpos.del - seq_along(qpos.del) + 1 # Correct back to ref coords
+  rv <- rbind( data.frame(Type="S", RefPos=refpos.sub, QueryPos=qpos.sub),
+               data.frame(Type="D", RefPos=refpos.del, QueryPos=qpos.del),
+               data.frame(Type="I", RefPos=refpos.ins, QueryPos=qpos.ins))
+  rv[rv$RefPos > -1,]
+}
+
+df.diffs <- function(i, drp, dd) {
+  df <- get.diffs(getSequences(drp)[i], dd$sequence[dd$map[i]])
+  df <- cbind(df, Abund = rep(drp$uniques[i], nrow(df)), 
+              Derep=rep(i, nrow(df)), Denoised=rep(dd$map[i], nrow(df)))
+  df$Qual <- drp$quals[cbind(df$Derep, df$QueryPos)]
+  df$Qual[df$Type == "D"] <- NA # Deletions don't have associated quality scores
+  df
+}
+# Test
+rf <- "AAAAAAAAGCATGCATGCATGCATGCAT" # Sub at 4, Del at 13, Ins at 29 (refpos)
+qq <- "AAACAAAAGCATCATGCATGCATGCATA"
+get.diffs(qq, rf)
+```
+
+Identify the subset of filtered reads to keep in this analysis, i.e. exclude contaminants and chimeras. Note however that there were no contaminants identified in this data previously, so just need to identify and remove chimeric filtered reads:
+```{r}
+bim.filt <- isBimeraDenovo(drp.filt, minFoldParentOverAbundance=3.5, multi=TRUE)
+table(bim.filt)
+table(drp.filt$uniques[bim.filt])
+```
+
+#Q to self: Should I keep the chimeras in for this?*
+
+Collate all errors from non-contaminant/non-chimeric reads:
+```{r}
+ii.keep <- which(!bim.filt) ###Q
+diffs.keep <- lapply(ii.keep, df.diffs, drp=drp.filt, dd=dd) # ~2 mins
+diffs.keep <- do.call(rbind, diffs.keep)
+diffs.keep <- diffs.keep[order(diffs.keep$Qual, decreasing=TRUE),]
+rownames(diffs.keep) <- NULL
+###
+nnt.keep <- sapply(seq(max(nchar(getSequences(drp.filt)[ii.keep]))), function(pos) {
+  sum(drp.filt$uniques[!bim.filt & nchar(getSequences(drp.filt)) >= pos])
+})
+table(is.na(diffs.keep$Qual), diffs.keep$Type)
+```
+
+Double-check with table of errors per read, make sure it matches the correct/incorrect sequence numbers.
+
+```{r}
+collated.incorrect.unqs <- unique(c(diffs.keep$Derep, which(bim.filt)))
+collated.incorrect.reads <- sum(drp.filt$uniques[collated.incorrect.unqs])
+if(!collated.incorrect.reads == tab.filt["Incorrect"]) {
+  stop("Unexpected numbers of error-containing reads after collation")
+}
+table(table(diffs.keep$Derep))
+```
+
+Vast majority have just one error. A small tail of higher error sequences.
+
+
+```{r, message=FALSE}
+pdiffs <- diffs.keep
+pdiffs$Qual[is.na(pdiffs$Qual)] <- 1 # Fixed after remapping Qual scores to categories
+pdiffs$Quality <- cut(pdiffs$Qual, c(0, 11, 21, 31, 41))
+qual.map <- c("(0-11]"="0-11", "(11,21]"="11-21", "(21,31]"="21-31", "(31,41]"="31-41")
+pdiffs$Quality <- qual.map[pdiffs$Quality]
+pdiffs$Quality[pdiffs$Type=="D"] <- "NA"
+pdiffs$Quality <- factor(pdiffs$Quality, levels=c(qual.map, "NA"))
+type.map <- c("S"="Substitution", "D"="Deletion", "I"="Insertion")
+pdiffs$Error <- factor(type.map[pdiffs$Type], levels=c("Substitution", "Insertion", "Deletion"))
+color.scale <- c("hotpink", colorRampPalette(c("deeppink2", "dodgerblue2"))(3))
+color.scale <- c(colorRampPalette(c("black", "cyan"))(4), "grey")
+# Convert counts to rates by using the total lengths of all kept reads
+pdiffs$Rate <- pdiffs$Abund/nnt.keep[pdiffs$QueryPos]
+# Force desired facet ymax limits with a custom data.frame, and set desired breaks
+dflim <- data.frame(Rate=c(0.001, 0.01, 0.003), 
+                    QueryPos=c(200, 200, 200), 
+                    Quality=c("NA", "NA", "NA"),
+                    Error=c("Substitution", "Insertion", "Deletion"))
+my_breaks <- function(x) { 
+  if (max(x) < 0.0015) { c("0.0000"=0, "0.0010"=0.001) }  # "0.0005"=0.0005, 
+  else if(max(x) < 0.005) { c("0.0000"=0, "0.0010"=0.001, "0.0020"=0.002, "0.0030"=0.003) }
+  #  else { c("0.0000"=0, "0.0050"=0.005, "0.0100"=0.01) }
+  else { c("0.0000"=0, "0.0020"=0.002, "0.0040"=0.004, "0.0060"=0.006, "0.0080"=0.008, "0.0100"=0.01) }
+}
+p.err.pos <- ggplot(data=pdiffs, aes(x=QueryPos,y=Rate,color=NULL, fill=Quality)) + geom_col() +
+  facet_grid(Error~., scales="free_y") + guides(color=FALSE) + xlab("Nucleotide Position") + ylab("Error Rate") +
+  scale_color_manual(values=color.scale) + scale_fill_manual(values=color.scale) + xlim(0, 1500)
+#+ geom_blank(data=dflim) + scale_y_continuous(breaks=my_breaks) + theme(axis.text.y=element_text(size=7))
+p.err.pos
+ggsave(file.path(path.fig, "ErrorRates_Loop.pdf"), p.err.pos, width=12, height=5, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "ErrorRates_Loop_1_200.pdf"), p.err.pos + xlim(1,200), width=12, height=5, units="in", useDingbats=FALSE)
+```
+
+*Q to self: Why is there a substitution spike at position >1500?*
+*A to self: That's just a sub that happened to be at the end of the longest ASV, thus a very small denominator. i.e. just noise.*
+
+# Error modes and optimizing maxEE threshold
+
+Now we're going to take a deeper dive into potential "structural" LoopSeq error modes, inspired by the detection of (a very low number) of chimeras in the filtered LoopSeq data, which supposedly should be entirely absent due to the way initial molecules are barcoded. The approach will be to use much more sensitive settings for DADA2 denoising in order to idenetify errors that stick out the most from the true sequences, and then manually inspect those sequences to generate new hypotheses about LoopSeq structural error modes.
+
+Denoise the filtered data into ASVs, using high-sensitivity DADA2 with `DETECT_SINGLETONS` and `OMEGA_A=1e-10`:
+```{r}
+dd10 <- dada(filt, err, DETECT_SINGLETONS=TRUE, OMEGA_A = 1e-10, multi=TRUE)
+dd10
+```
+
+```{r}
+is.correct10 <- dd10$sequence %in% dd$sequence
+is.correct10
+```
+
+The first 27 sequences are the expected ones from the mock community, the next (28-45) are artefacts that are either very different from the true sequences, or are at anomalously high abundance for a random erorr. Using the `$clustering` stats to dig in further:
+```{r}
+clust.correct <- dd10$clustering[is.correct10,-1]
+clust.incorrect <- dd10$clustering[!is.correct10,-1]
+clust.correct
+clust.incorrect
+```
+
+These artefact sequences are all at least `min(clust.incorrect$birth_ham)` nts, and as much as `max(clust.incorrect$birth_ham)` in hamming distance away from the true ASV from which they were split. Additionally, the abundances of the artefact sequences only spans the range from `min(clust.incorrect$abundance)` to `max(clust.incorrect$abundance)` reads. Thus, these look like "structural" errors, in which large numbers of errors are introduced through processes such as chimerization.
+
+As a first pass, let's see if chimeras are identified within these sequences using the standard dada2 bimera-matching approach. Considering :
+```{r}
+sq10 <- getSequences(dd10); names(sq10) <- paste0("Seq", seq_along(sq10))
+sq10.incorrect <- sq10[!sq10 %in% getSequences(dd)]
+bim10.incorrect <- cbind(isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5, allowOneOff=TRUE))[sq10.incorrect,]
+rownames(bim10.incorrect) <- names(sq10.incorrect)
+colnames(bim10.incorrect) <- c("Exact", "Allow One Off")
+bim10.incorrect
+```
+
+The additional sequences contain at least 3 chimeras identified by the standard left-right bimerea detection method, and another 3 (for a total of 6), when allowing a bit of fuzziness in the form of `allowOneOff=TRUE`. However, what are the rest of these putative structural errors? Now for a manual inspection approach using BLAST against nt and inspection of patterns in the alignments:
+
+```{r}
+dada2:::pfasta(sq10.incorrect, id=names(sq10.incorrect))
+```
+
+From BLAST against nt, the results look like the following, where "bimera" is indicated by the alignment of the best BLAST hit showing almost all errors occurring at the start or the end of the query sequence, and "introgression" is indicated by almost all errors occurring in a relatively short internal stretch of the query sequence.
+
+Sq28: Bimera
+Sq29: Bimera
+Sq30: Bimera-ish
+Sq31: A short-ish introgression (~50nts?)
+Sq32: A short-ish introgression (~50nts?)
+Sq33:  short-ish introgression (~25nts?)
+Sq34: A short-ish introgression (~30nts?)
+Sq35: Introgression (~50nts), plus a couple of mismatches at the beginning?
+Sq36: Maybe short introgression? Pattern is less clear
+Sq37: Bimera
+Sq38: Bimera
+Sq39: Bimera
+Sq40: Short introgression (~25nts)
+Sq41: Not sure, could be a small number of substitutions
+Sq42: Likely bimera, small number of differences near start of sequence
+Sq43: Introgression (~60nts)
+Sq44: Bimera
+Sq45: Long-ish Introgression? (~150nts)
+
+Overall there are two take-aways here. First, there are some bimera that are produced in LoopSeq data, that are mostly caught by `isBimeraDenovo(..., allowOneOff=TRUE)` and consistently supported by manual inspection of the BLAST best hit alignments. Second, there seems to be another structural error mode in which short (<200 nts, often <50nts) stretches of DNA possibly from another molecule are introgressed in the middle of another DNA sequence.
+
+Now let's use the known correct seuqences in this dataset to identify evidence for introgressions in a reasonably systematic way. We'll use a moving window approach to scan each incorrect sequence for the best match to a correct sequence from one of the 8 strains, and record which strain it best matches as the window moves along the entire sequence:
+```{r}
+refs <- dd$sequence[1:27]
+names(refs) <- tax[1:27,6]
+get.ham <- function(sq, ref, window=40, step=10) {
+  # Return, a vector with cols = len(sq)/step 
+  # Values are the hammings between sq and the ref in each window
+  # with coordinates based on the sq position
+  al <- nwalign(sq, ref, band=64, vec=TRUE)
+  str1 <- strsplit(al[[1]], "")[[1]] # str1=sq
+  str2 <- strsplit(al[[2]], "")[[1]]
+  mismatches <- (str1!=str2)
+  mismatches <- mismatches[str1 != "-"]
+  sapply(seq(1, nchar(sq)-window, step), function(i) sum(mismatches[i:(i+window-1)]))
+}
+assign.ref <- function(sqi, refs) {
+  hams <- sapply(refs, function(ref) get.ham(sqi, ref=ref))
+  sapply(seq(nrow(hams)), function(i) {
+    matches <- hams[i,] == min(hams[i,])
+    matches <- colnames(hams)[matches]
+    if(length(unique(matches))==1) {
+      unique(matches)
+    } else{ NA }
+  })
+}
+assignments <- lapply(sq10.incorrect, assign.ref, refs=refs)
+nwindows <- lapply(assignments, length)
+#sqnames <- paste0("Sq", sapply(seq_along(sq), function(i) sprintf("%02i",i)))
+df <- data.frame(Assignment=do.call(c, assignments),
+                 Sequence=rep(names(sq10.incorrect), times=nwindows),
+                 Position=do.call(c, lapply(nwindows, function(nw) seq(1,nw*10,10))))
+library(ggplot2)
+ggplot(data=df, aes(x=Position, y=Assignment, color=Assignment)) + geom_point() + facet_wrap(~Sequence)
+
+
+# Need to do ~1000 * 27 of these... time no problem, so about 27 seconds. Time no problem.
+#foo <- RNAStringSet(DNAStringSet(dd$sequence))
+#al <- AlignSeqs(foo)
+#bar <- stringDist(narrow(al, 1, 50), method="hamming") # Letter mismatches, which is what I want
+```
+
+These results coincide quite well with the manual BLAST inspections, and suggest it would be possible to systematically scan for chimera/introgression errors. Another question is how effectively a simple approach of optimizing the quality score filtering can remove these errors:
+
+```{r}
+drp <- derepFastq(filt)
+unname(sapply(sq, function(i) mean(drp$quals[i,], na.rm=TRUE)))
+```
+
+That looks promising, the average quality in 29-45 (incorrect sequences) is much lower, although this isn't 100% perfect.
+
+HERE HERE HERE HERE
+
+Let's inspect at a read-by-read level how the distribution of overall read qualities of reads with errors and reads without errors compares:
+```{r}
+get.readdf <- function(fni, refs, sqinfo=TRUE) {
+  require(ShortRead)
+  srq <- readFastq(fni)
+  sq <- as.character(sread(srq))
+  qq <- as(quality(srq), "matrix")
+  mnq <- apply(qq, 1, mean, na.rm=TRUE)
+  ee <- dada2:::C_matrixEE(qq)
+  if(sqinfo) {
+    data.frame(Sequence=sq, Length=nchar(sq),
+               Correct=sapply(sq, function(i) any(grepl(i, refs))),
+               MeanQ = mnq, ExpErr=ee, stringsAsFactors = FALSE)
+    
+  } else { 
+    data.frame(Correct=sapply(sq, function(i) any(grepl(i, refs))),
+               MeanQ = mnq, ExpErr=ee)
+  }
+}
+dfr <- get.readdf(filt, refs)
+ggplot(data=dfr, aes(x=MeanQ, fill=Correct)) + geom_histogram(bins=100) + facet_grid(Correct~., scales="free_y") + ggtitle("Filtered Reads")
+ggplot(data=dfr, aes(x=ExpErr, fill=Correct)) + geom_histogram(bins=100) + facet_grid(Correct~., scales="free_y") + ggtitle("Filtered Reads")
+dfr0 <- get.readdf(nop, refs)
+ggplot(data=dfr0, aes(x=MeanQ, fill=Correct)) + geom_histogram(bins=100) + facet_grid(Correct~., scales="free_y") + ggtitle("Raw Reads")
+ggplot(data=dfr0, aes(x=ExpErr, fill=Correct)) + geom_histogram(bins=100) + facet_grid(Correct~., scales="free_y") + ggtitle("Raw Reads")
+```
+
+Expected errors seems to be a significantly better classifier than average quality score. But won't be perfect (of course) even with maximum filtering. Let's look at the greatest possibilities:
+
+```{r}
+dfr0.inc <- dfr0[order(dfr0$ExpErr),]
+WINDOW<-100;STEP<-10
+acc.inc <- sapply(seq(1, nrow(dfr0.inc)-WINDOW+1, STEP), function(i) mean(dfr0.inc$Correct[i:(i+WINDOW-1)]))
+mee.inc <- sapply(seq(1, nrow(dfr0.inc)-WINDOW+1, STEP), function(i) mean(dfr0.inc$ExpErr[i:(i+WINDOW-1)]))
+plot(acc.inc, ylim=c(0,1))
+plot(mee.inc, acc.inc, ylim=c(0,1))
+plot(mee.inc, acc.inc, xlim=c(0,1), ylim=c(0,1))
+```
+
+Definitely supports a higher `maxEE` threshold. Look at cumulative accuracy at different cutoffs as well:
+```{r}
+plot(dfr0.inc$ExpErr, cumsum(!dfr0.inc$Correct)/seq(nrow(dfr0.inc)), xlim=c(0.1,4), ylab="Fraction w/ Errors", log="x")
+plot(dfr0.inc$ExpErr, seq(nrow(dfr0.inc))/nrow(dfr0.inc), xlim=c(0.1,4), ylab="Fraction w/ Errors", log="x")
+#plot((nrow(dfr.inc)-seq(nrow(dfr.inc))+1)/nrow(dfr.inc), cumsum(as.logical(dfr.inc$Correct))/seq(nrow(dfr.inc)), ylim=c(0,1))
+```
+
+Overall, this is strong support for a maxEE threshold of ~0.5 or ~0.4, which still keeps >90% of reads while avoiding the dramatic increase to mostly errors in the EE>0.5 range.
+
+What is going on in that drop in accuracy around 0.2 though? (has to do with legnth variation and whether shorter variants exactly match...)
+```{r}
+which(acc.inc<0.8)[1:20]
+# acc <- sapply(seq(1, nrow(dfr0.inc)-WINDOW+1, STEP), function(i) mean(dfr0.inc$Correct[i:(i+WINDOW-1)]))
+ii <- seq(1, nrow(dfr0.inc)-WINDOW+1, STEP)[which(acc.inc<0.8)][c(1,15)] # About 15 in a row there
+df.inspect <- dfr0.inc[ii[[1]]:ii[[2]],]
+i.inspect <- as.integer(rownames(df.inspect[!df.inspect$Correct,]))
+sq.inspect <- getSequences(nop)[i.inspect]
+#unname(nchar(getSequences(nop)[1:length(sq.inspect)]))
+#unname(nchar(sq.inspect))
+#dada2:::pfasta(sq.inspect[1:10])
+```
+
+By BLAST, They are all single substitutions (or deletions). Dunno, could come back to this, but not really that interesting at this point.
+
+What would be nice at this point is to operationally define the different types of reads (correct, SNPs/indels, chimeras (bimera), chimeras (introgression), contaminants) and provide a table of each type of read. Can leave a fraction undefined. Do this on raw reads (after primer identification/removal).
+
+Classify all reads into categorized error types: Correct, SNP/indel, Bimera, Introgression, Contaminant:
+```{r}
+drp.nop <- derepFastq(nop)
+type = character(nrow(dfr0))
+type[1:length(type)] <- NA
+# is.correct <- dfr0$Correct # includes varaints of the correct full-length sequences that are a bit shorter, but otherwise an exact match
+## Identify bimeras and introgressions based on the assignment against the reference species
+## Note, this will only pick up those that mix together different species, not different alleles from the same species
+assign.0 <- lapply(dfr0$Sequence, assign.ref, refs=refs)
+## Leaving out taxonomy for now, as I believe there are no contamiannts and it takes a while to run, but will run it later:
+##tax.nop <- assignTaxonomy(getSequences(drp.nop), "~/tax/silva_nr_v132_train_set.fa.gz", multi=TRUE, minBoot=80)
+##saveRDS(tax.nop, file.path(path.rds, "Zymo16S_tax_nop.rds"))
+tax.nop <- readRDS(file.path(path.rds, "Zymo16S_tax_nop.rds"))
+if(!identical(getSequences(drp.nop), getSequences(tax.nop))) stop("Broken tax.nop") # Must be TRUE
+gen.0 <- tax.nop[dfr0$Sequence, "Genus"]
+ham.0 <- unname(sapply(dfr0$Sequence, function(query) min(nwhamming(query, refs, band=64, vec=TRUE))))
+```
+
+```{r}
+# Function to classify bimeras and introgressions from species-level sbest ubstr match profile
+classify.chimera <- function(ass) {
+  ass <- ass[!is.na(ass)]
+  nunq <- length(unique(ass))
+  if(nunq == 1) { return("NonChimera") }
+  else if(nunq > 2) { return("Complex") } # Only doing simple chimeras
+  else {
+    ntransitions <- sum(ass[2:length(ass)] != ass[1:(length(ass)-1)])
+    if(ntransitions==1) { return("Bimera") } 
+    else if(ntransitions==2) { return("Introgression") }
+    else { return("Complex") }
+  }
+}
+chim.0 <- sapply(assign.0, classify.chimera)
+sqother.0 <- getSequences(drp.nop); sqother.0 <- sqother.0[!sqother.0 %in% refs]
+unq <- c(rep(100L, length(refs)), rep(1L, length(sqother.0)))
+names(unq) <- c(refs, sqother.0)
+ib <- isBimeraDenovo(unq, minFoldParentOverAbundance=4.5, multi=TRUE)
+iboo <- isBimeraDenovo(unq, minFoldParentOverAbundance=4.5, allowOneOff=TRUE, multi=TRUE)
+isbim.0 <- ib[dfr0$Sequence]
+isbimoo.0 <- iboo[dfr0$Sequence]
+table(chim.0=="Bimera", isbim.0)
+table(chim.0=="Bimera", isbimoo.0)
+```
+
+Hm... so there are substantially more reads identified as bimeras by the isBimeraDenovo method than by this reference-matching method. I wonder what those are... chimeras between alleles of the same species? Very short chimeric regions at start/end?
+
+```{r}
+ibc <- which(!chim.0=="Bimera" & isbimoo.0)
+table(table(ibc)) # All singletons
+#assign.0[[ibc[1]]]
+#assign.0[[ibc[2]]]
+table(chim.0[ibc])
+```
+
+Not obvious from BLAST either. Typically have fairly low distances to the reference sequence though, with difference often appearing near start/end. A couple look like chimeras, but others not clear at all.
+
+```{r}
+table(ham.0)
+table(ham.0, chim.0)
+```
+
+```{r}
+ii <- which(ham.0 > 8 & chim.0=="NonChimera")
+## pfasta
+```
+
+BLAST shows that some of this is due to (1) introgression of some junk DNA (? matches nothing in BLAST, (2) + (3) incomplete detection of introgressions due to NAs where the introgression is because of of an introgressed region that is shared between two taxa other than the base taxa (e.g. number 3). Another two (numbers 4&5) have major deletions in the middle of ~100-200 nts.
+
+```{r}
+table(gen.0) # 2 NAs
+dada2:::pfasta(dfr0$Sequence[is.na(gen.0)])
+```
+
+The NA genus calls are Enteroccocus, but with a signficiant chimeric region at the beginning that probably leads to the NA. No contaminats at all.
+
+So... where to next? How to make final calls on bimeras/introgressions/small-sub-indel error types?
+
+HERE HERE HERE HERE HERE
+HERE HERE HERE HERE HERE
+HERE HERE HERE HERE HERE
+HERE HERE HERE HERE HERE
+HERE HERE HERE HERE HERE
+
 
 
 
