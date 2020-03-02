@@ -12,6 +12,7 @@ Load libraries, set the working directory to the location of this Rmarkdown file
 library(dada2); packageVersion("dada2") # Should be 1.13.1 or later
 library(ShortRead, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
+library(reshape2, quietly=TRUE)
 setwd("~/LoopManuscript") # CHANGE ME to the location of this file
 path <- "~/LoopData/16S/Zymo" # CHANGE ME to the location of the fastq files
 path.fig <- "Figures" # Relative path to where figures should be saved
@@ -368,6 +369,7 @@ These artefact sequences are all at least `min(clust.incorrect$birth_ham)` nts, 
 As a first pass, let's see if chimeras are identified within these sequences using the standard dada2 bimera-matching approach. Considering :
 ```{r}
 sq10 <- getSequences(dd10); names(sq10) <- paste0("Seq", seq_along(sq10))
+sq10.ref <- sq10[sq10 %in% getSequences(dd)]
 sq10.incorrect <- sq10[!sq10 %in% getSequences(dd)]
 bim10.incorrect <- cbind(isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5), isBimeraDenovo(dd10, minFoldParentOverAbundance=4.5, allowOneOff=TRUE))[sq10.incorrect,]
 rownames(bim10.incorrect) <- names(sq10.incorrect)
@@ -408,7 +410,7 @@ Now let's use the known correct seuqences in this dataset to identify evidence f
 ```{r}
 refs <- dd$sequence[1:27]
 names(refs) <- tax[1:27,6]
-get.ham <- function(sq, ref, window=40, step=10) {
+get.ham <- function(sq, ref, window=50, step=10) {
   # Return, a vector with cols = len(sq)/step 
   # Values are the hammings between sq and the ref in each window
   # with coordinates based on the sq position
@@ -419,8 +421,9 @@ get.ham <- function(sq, ref, window=40, step=10) {
   mismatches <- mismatches[str1 != "-"]
   sapply(seq(1, nchar(sq)-window, step), function(i) sum(mismatches[i:(i+window-1)]))
 }
-assign.ref <- function(sqi, refs) {
-  hams <- sapply(refs, function(ref) get.ham(sqi, ref=ref))
+assign.ref <- function(sqi, refs, window=50, step=10) {
+  # Find best match of sqi to the provided refs
+  hams <- sapply(refs, function(ref) get.ham(sqi, ref=ref, window=window, step=step))
   sapply(seq(nrow(hams)), function(i) {
     matches <- hams[i,] == min(hams[i,])
     matches <- colnames(hams)[matches]
@@ -429,23 +432,198 @@ assign.ref <- function(sqi, refs) {
     } else{ NA }
   })
 }
-assignments <- lapply(sq10.incorrect, assign.ref, refs=refs)
+```
+
+Check that expected results are obtained on the reference sequences themselves
+```{r}
+WINDOW=40
+assignments.ref <- lapply(sq10.ref, assign.ref, refs=refs, window=WINDOW)
+nwindows.ref <- lapply(assignments.ref, length)
+df.ref <- data.frame(Assignment=do.call(c, assignments.ref),
+                     Sequence=rep(names(sq10.ref), times=nwindows.ref),
+                     Position=do.call(c, lapply(nwindows.ref, function(nw) seq(1,nw*10,10))))
+ggplot(data=df.ref, aes(x=Position, y=Assignment, color=Assignment)) + 
+  geom_point() + ylab(NULL) + facet_wrap(~Sequence) + theme(axis.text.y = element_blank())
+```
+
+Everything is consistently assigned, w/ NAs mixed in where the sequences of different taxa can't be differentiated over the window
+
+Now look at the incorrect sequences that were inspected manually above:
+```{r}
+WINDOW <- 40
+assignments <- lapply(sq10.incorrect, assign.ref, refs=refs, window=WINDOW)
 nwindows <- lapply(assignments, length)
 #sqnames <- paste0("Sq", sapply(seq_along(sq), function(i) sprintf("%02i",i)))
 df <- data.frame(Assignment=do.call(c, assignments),
                  Sequence=rep(names(sq10.incorrect), times=nwindows),
                  Position=do.call(c, lapply(nwindows, function(nw) seq(1,nw*10,10))))
-library(ggplot2)
-ggplot(data=df, aes(x=Position, y=Assignment, color=Assignment)) + geom_point() + facet_wrap(~Sequence)
-
-
-# Need to do ~1000 * 27 of these... time no problem, so about 27 seconds. Time no problem.
-#foo <- RNAStringSet(DNAStringSet(dd$sequence))
-#al <- AlignSeqs(foo)
-#bar <- stringDist(narrow(al, 1, 50), method="hamming") # Letter mismatches, which is what I want
+ggplot(data=df, aes(x=Position, y=Assignment, color=Assignment)) + 
+  geom_point() + ylab(NULL) + facet_wrap(~Sequence) + theme(axis.text.y = element_blank())
 ```
 
-These results coincide quite well with the manual BLAST inspections, and suggest it would be possible to systematically scan for chimera/introgression errors. Another question is how effectively a simple approach of optimizing the quality score filtering can remove these errors:
+These results coincide quite well with the manual BLAST inspections, and suggest it would be possible to systematically scan for chimera/introgression errors. 
+
+Automatially classify all reads into categorized error types Correct, SNP/indel, Bimera, Introgression, Contaminant, and Uncategorized with the following definitions:
+
+* Correct: no mismatches to the reference sequences (small length variation is OK)
+* Bimera: Identified as bimera by `isBimeraDenovo` or reference scanning method identifies two segments
+* Introgression: Reference scanning method identifies three segments, with the middle segment a different taxon
+* Contaminant: From a taxon outside the expected community. There aren't any of these here (see above).
+* Point Error(s): Not in any of the above catgories, but within 3 hamming distance of a reference sequence (after N-W alignment)
+* Uncategorized: The remaining sequences.
+
+Define the function that characterizes bimeras and introgressions from the assignment data:
+```{r}
+classify.chimera <- function(asn) {
+  asn <- asn[!is.na(asn)]
+  nunq <- length(unique(asn))
+  if(nunq == 1) { return("NonChimera") }
+  else if(nunq > 2) { return("Complex") } # Only doing simple chimeras
+  else {
+    ntransitions <- sum(asn[2:length(asn)] != asn[1:(length(asn)-1)])
+    if(ntransitions==1) { return("Bimera") } 
+    else if(ntransitions==2) { return("Introgression") }
+    else { return("Complex") }
+  }
+}
+```
+
+Test the function on the reference and incorrect sequences manually inspected and visually inspected above:
+
+```{r}
+sapply(assignments.ref, classify.chimera)
+```
+
+Reference seequences correctly all identified as non-chimeras. Now the incorrect sequences:
+
+```{r}
+sapply(assignments, classify.chimera)
+```
+
+Again, this matches exactly with the visual plotted results, which matched well with the manual inspection. Function is working as expected.
+
+We'll now perform characterization of all the the sequences prior to filtering and trimming, so we can get the most complete picture of how error rates and types change as a function of quality score thresholds.
+
+Do the base computations:
+```{r}
+sq.nop <- getSequences(drp.nop)
+assignments.nop <- lapply(sq.nop, assign.ref, refs=refs, window=WINDOW)
+refclass.nop <- sapply(assignments.nop, classify.chimera)
+isbim.nop <- isBimeraDenovo(drp.nop, minFoldParentOverAbundance=4.5, multi=TRUE)
+hams.nop <- unname(sapply(sq.nop, function(query) min(nwhamming(query, refs, band=64, vec=TRUE))))
+```
+
+Classify the dereplicated unique sequences into the categories described previously:
+```{r}
+classifications.nop <- rep("Uncategorized", length(sq.nop))
+is.correct.nop <- sapply(sq.nop, function(pat, x=refs) any(grepl(pat, x))) # Allows for length differences
+is.bimera.nop <- (isbim.nop | refclass.nop == "Bimera") & !is.correct.nop
+is.introgression.nop <- refclass.nop == "Introgression" & !is.correct.nop & !is.bimera.nop
+is.error.nop <- hams.nop <= 3 & !is.correct.nop & !is.bimera.nop & !is.introgression.nop
+classifications.nop[is.correct.nop] <- "Correct"
+classifications.nop[is.bimera.nop] <- "Bimera"
+classifications.nop[is.introgression.nop] <- "Introgression"
+classifications.nop[is.error.nop] <- "Point Error(s)"
+table(classifications.nop) # Unique sequences
+tapply(drp.nop$uniques, classifications.nop, sum) # Read-weighted
+```
+
+Looks good. Now let's plot the rates of errors by type as a function of the expected error threshold.
+
+First read in the raw reads with their associated quality information, and classify them via the dereplicated sequences already classified above.
+```{r}
+get.readdf <- function(fni) {
+  require(ShortRead)
+  srq <- readFastq(fni)
+  sq <- as.character(sread(srq))
+  qq <- as(quality(srq), "matrix")
+  mnq <- apply(qq, 1, mean, na.rm=TRUE)
+  ee <- dada2:::C_matrixEE(qq)
+  data.frame(Sequence=sq, Length=nchar(sq),
+             MeanQ = mnq, ExpErr=ee, stringsAsFactors = FALSE)
+}
+dfr.nop <- get.readdf(nop)
+names(classifications.nop) <- sq.nop
+dfr.nop$Classification <- classifications.nop[dfr.nop$Sequence]
+dfr.nop <- dfr.nop[order(dfr.nop$ExpErr, dfr.nop$Classification=="Correct"),]
+```
+
+Now let's plot the fraction of each type as a function of the expected errors threshold.
+```{r}
+types <- c("Correct", "Bimera", "Introgression", "Point Error(s)", "Uncategorized")
+for(type in types) { dfr.nop[[type]] <- cumsum(dfr.nop$Classification == type) }
+mdfr.nop <- melt(dfr.nop, measure.vars = types, variable.name="Type", value.name="Reads")
+ggplot(data=mdfr.nop, aes(x=ExpErr, y=Reads, color=Type)) + geom_point() + xlim(0,10)
+ggplot(data=mdfr.nop, aes(x=ExpErr, y=Reads, color=Type)) + geom_point() + 
+  xlim(0,4) + ylim(0, 1000)
+```
+
+Very nice, would be even better if this was plotted by fraction of total reads though. Then could also leave out the correct line, which will make ylim automatic sizing work appropriately.
+
+```{r}
+for(type in types) { dfr.nop[[type]] <- cumsum(dfr.nop$Classification == type)/seq(nrow(dfr.nop)) }
+mdfr.nop <- melt(dfr.nop, measure.vars = types, variable.name="Type", value.name="Rate")
+mdfr.nop <- mdfr.nop[order(mdfr.nop$ExpErr, mdfr.nop$Type=="Correct"),]
+pmdfr.nop <- mdfr.nop[(nrow(mdfr.nop)/10):nrow(mdfr.nop),] 
+# Drop first tenth of data.frame to let cumulative rate estimates stabilize before plotting them
+ggplot(data=pmdfr.nop, aes(x=ExpErr, y=Rate, color=Type)) + 
+  geom_point() + xlim(0,10)
+ggplot(data=pmdfr.nop[!pmdfr.nop$Type == "Correct",], aes(x=ExpErr, y=Rate, color=Type)) + 
+  geom_point() + xlim(0,4) + xlab("Maximum Expected Error") + ylab("Per-read Error Rates")
+```
+
+Looks pretty good. Should include the fraction of reads kept at these EE thresholds as well. Clear evidence that a threshold of ~0.5 would be very effective. Maybe even lower, although then balancing against loss of reads starts to matter more.
+
+Plot fraction of reads kept vs. error rates? How about per-base error rates as a function of expected error threshold?
+
+
+
+HERE HERE HERE HERE
+
+HERE HERE HERE HERE
+
+HERE HERE HERE HERE
+
+HERE HERE HERE HERE
+
+HERE HERE HERE HERE
+
+
+
+Define the function that characterizes bimeras and introgressions from the assignment data:
+```{r}
+chim.0 <- sapply(assign.0, classify.chimera)
+sqother.0 <- getSequences(drp.nop); sqother.0 <- sqother.0[!sqother.0 %in% refs]
+unq <- c(rep(100L, length(refs)), rep(1L, length(sqother.0)))
+names(unq) <- c(refs, sqother.0)
+ib <- isBimeraDenovo(unq, minFoldParentOverAbundance=4.5, multi=TRUE)
+iboo <- isBimeraDenovo(unq, minFoldParentOverAbundance=4.5, allowOneOff=TRUE, multi=TRUE)
+isbim.0 <- ib[dfr0$Sequence]
+isbimoo.0 <- iboo[dfr0$Sequence]
+table(chim.0=="Bimera", isbim.0)
+table(chim.0=="Bimera", isbimoo.0)
+
+```
+
+```{r}
+type = character(nrow(dfr0))
+type[1:length(type)] <- NA
+# is.correct <- dfr0$Correct # includes varaints of the correct full-length sequences that are a bit shorter, but otherwise an exact match
+## Identify bimeras and introgressions based on the assignment against the reference species
+## Note, this will only pick up those that mix together different species, not different alleles from the same species
+assign.0 <- lapply(dfr0$Sequence, assign.ref, refs=refs)
+## Leaving out taxonomy for now, as I believe there are no contamiannts and it takes a while to run, but will run it later:
+##tax.nop <- assignTaxonomy(getSequences(drp.nop), "~/tax/silva_nr_v132_train_set.fa.gz", multi=TRUE, minBoot=80)
+##saveRDS(tax.nop, file.path(path.rds, "Zymo16S_tax_nop.rds"))
+tax.nop <- readRDS(file.path(path.rds, "Zymo16S_tax_nop.rds"))
+if(!identical(getSequences(drp.nop), getSequences(tax.nop))) stop("Broken tax.nop") # Must be TRUE
+gen.0 <- tax.nop[dfr0$Sequence, "Genus"]
+ham.0 <- unname(sapply(dfr0$Sequence, function(query) min(nwhamming(query, refs, band=64, vec=TRUE))))
+```
+
+
+
+Another question is how effectively a simple approach of optimizing the quality score filtering can remove these errors:
 
 ```{r}
 drp <- derepFastq(filt)
@@ -453,8 +631,6 @@ unname(sapply(sq, function(i) mean(drp$quals[i,], na.rm=TRUE)))
 ```
 
 That looks promising, the average quality in 29-45 (incorrect sequences) is much lower, although this isn't 100% perfect.
-
-HERE HERE HERE HERE
 
 Let's inspect at a read-by-read level how the distribution of overall read qualities of reads with errors and reads without errors compares:
 ```{r}
