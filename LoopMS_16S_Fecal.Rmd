@@ -1,0 +1,365 @@
+---
+title: "Evaluationg LoopSeq 16S on Human Fecal Samples"
+author: "BJC"
+date: "3/30/2020"
+output: html_document
+---
+
+## Setup
+
+Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
+```{r, echo=FALSE}
+library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.13.1 or later
+library(ShortRead, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(reshape2, quietly=TRUE)
+set.seed(100)
+setwd("~/LoopManuscript") # CHANGE ME to the location of this file
+path <- "~/LoopData/16S/CallahanFecal" # CHANGE ME to the location of the fastq files
+path.fig <- "Figures" # Relative path to where figures should be saved
+path.rds <- "RDS" # Relative path to where RDS should be saved
+fn <- list.files(path, pattern=".fq$", full.names=TRUE)
+sapply(fn, function(f) length(getSequences(f)))
+```
+
+## QA, Filtering and Trimming
+
+First do basic QA on these data, and then apply the DADA2 filtering and trimming workflow with the parameters selected from the detailed inspection of the Zymno mock community.
+
+```{r}
+plotComplexity(fn)
+```
+
+```{r}
+plotQualityProfile(fn)
+```
+
+These profiles look consistent with what we saw in the Zymo mock -- no low complexity issues, and high qualities throughout the 16S sequence (i.e. ignoring the >1500nt tail). The one difference, especially in the R3.1 is that the length distribution is different, around a half of the reads in that library appear not to extend to the full-length of the 16S gene. This may be a common way in which quality variation in Loop libraries becomes evidence, as molecules that are sequenced to insufficient coverage are likely to end up being assembled into incomplete contigs that don't cover the entire targeted amplicon.
+
+Enter primers, and confirm their presence and the overall orientation of the reads. Code is adapated from [the DADA2 ITS tutorial workflow](https://benjjneb.github.io/dada2/ITS_workflow.html#identify-primers):
+```{r}
+FWD <- "AGAGTTTGATCMTGGC" # Loop 16S forward primer
+REV <- "TACCTTGTTACGACTT" # Loop 16S reverse primer
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)
+    orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
+        RevComp = reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+for(f in fn) {
+  cat("Primers detected in", basename(f), "\n")
+  print(rbind(FWD.Primer = sapply(allOrients(FWD), primerHits, fn = f), 
+              REV.Primer = sapply(allOrients(REV), primerHits, fn = f)))
+  cat("Out of", length(readFastq(f)), "total reads.\n\n")
+}
+```
+
+Primers in the expected orientations, and yes it looks like the R3.1 library will take a big hit from incomplete amplicon reconstruction, with the REV primer only being detected in <20\% of the total reads, whereas the other libraries are closer to 50\%. It is worth noting that all of these libraries have a much lower fraction of primer-complete reads than the Zymo mock community data had (~90\%).
+
+Remove the primers (and any flanking sequence) from the reads, and filter out reads that don't contain both primers:
+```{r}
+nop <- file.path(path, "nop", basename(fn))
+out <- removePrimers(fn, nop, FWD, rc(REV), verbose=TRUE)
+```
+
+Filter the sequences and enforce minimum/maximum lengths appropriate for full-length 16S. Note that we are enforcing `maxEE=1`, as that was determined to be a better filter than `maxEE=2` in the Zymo mock community data.
+```{r}
+filt <- file.path(path, "filtered", basename(fn))
+track <- filterAndTrim(nop, filt, maxEE=1, minLen=1400, maxLen=1600, verbose=TRUE)
+```
+
+Final inspection of the quality profile:
+```{r, message=FALSE}
+plotQualityProfile(filt)
+```
+
+Final progress of reads through filtering and trimming:
+```{r}
+cbind(raw=out[,1], primers=out[,2], filtered=track[,2])
+```
+
+The large loss of reads due to a lack of detectable primers, especially in the R3.1 library, is notable. It seems likely that optimizing the ratio of Loop molecules to total output reads will be an important part of maximizing throughput in the form of the most high-quality Loop reads per run.
+
+# Denoising
+
+Learn the error rates:
+```{r, warning=FALSE}
+err.rds <- file.path(path.rds, "err_16S_Fecal.rds") # RDS save/load to speed up reruns of the code
+if(!file.exists(err.rds)) {
+  err <- learnErrors(filt, multi=TRUE, verbose=0)
+  saveRDS(err, err.rds)
+}
+err <- readRDS(err.rds)
+plotErrors(err, nominalQ=TRUE)
+```
+
+Denoise the filtered data into ASVs using current DADA2 defaults:
+```{r}
+dd <- dada(filt, err, multi=TRUE, verbose=0)
+dd
+```
+
+Make sequence table and remove chimeras:
+```{r}
+sta <- makeSequenceTable(dd)
+st <- removeBimeraDenovo(sta, minFoldParentOverAbundance=4.5, multi=TRUE, verbose=TRUE)
+```
+
+Assign taxonomy:
+```{r}
+tax.rds <- file.path(path.rds, "tax_16S_Fecal.rds") # RDS save/load to speed up reruns of the code
+if(!file.exists(tax.rds)) {
+  tax <- assignTaxonomy(st, "~/tax/silva_nr_v132_train_set.fa.gz", minBoot=80, multi=TRUE)
+  saveRDS(tax, tax.rds)
+}
+tax <- readRDS(tax.rds)
+if(!identical(getSequences(tax), getSequences(st))) stop("Taxonomy mismatch.")
+table(tax[,"Phylum"], useNA="ifany")
+```
+
+The usual suspects at the Phylum level at least.
+
+## Comparison to PacBio full-length 16S sequencing results
+
+Currently, PacBio is the gold standard for full-length 16S gene sequencing. Previously, we sequenced these same three fecal samples as part of [our earlier investigation of the accuracy of PacBio full-length 16S sequencing](https://doi.org/10.1093/nar/gkz569). We processed those samples through the DADA2 workflow in that paper, and have included the sequence table obtained from a set of 12 fecal samples (including the 3 resequenced here using Loop full-length 16S) as part of this repository.
+
+Importing PacBio results, and coordinating sample names between the Loop and PacBio results:
+```{r}
+pb1.rds <- file.path(path.rds, "PacBio_Fecal_st1.rds")
+st1.pb <- removeBimeraDenovo(readRDS(pb1.rds), minFoldParentOverAbundance=4.5, 
+                             multi=TRUE, verbose=TRUE)
+pb2.rds <- file.path(path.rds, "PacBio_Fecal_st2.rds")
+st2.pb <- removeBimeraDenovo(readRDS(pb2.rds), minFoldParentOverAbundance=4.5, 
+                             multi=TRUE, verbose=TRUE)
+sam.names <- sapply(strsplit(rownames(st), "_"), `[`, 1) # e.g. R3.1_contig_list_trimmed.fq
+rownames(st) <- sam.names; rownames(sta) <- sam.names
+rownames(st1.pb) <- gsub("^Callahan_16S_2pM-Cell1_", "", rownames(st1.pb)) # Remove prefix
+rownames(st1.pb) <- gsub("[.]fastq[.]gz$", "", rownames(st1.pb)) # Remove suffix
+rownames(st1.pb) <- gsub("_", "", rownames(st1.pb)) # e.g. R_3.1
+rownames(st2.pb) <- gsub("_", "", rownames(st2.pb)) # e.g. R_3.1
+if(!all(rownames(st) %in% rownames(st1.pb))) stop("Sample name mismatch (1).")
+if(!all(rownames(st) %in% rownames(st2.pb))) stop("Sample name mismatch (2).")
+st1.pb <- st1.pb[rownames(st),]
+st2.pb <- st2.pb[rownames(st),]
+```
+
+In the PacBio protocol, a slightly different set of primers is used:
+```{r}
+FWD.pacb <- "AGRGTTYGATYMTGGCTCAG" 
+FWD.loop <- "AGAGTTTGATCMTGGC"
+REV.pacb <- "RGYTACCTTGTTACGACTT"
+REV.loop <-    "TACCTTGTTACGACTT"
+```
+
+The result is that the Loop sequences have an additional 4 nucleotides at the start of the reads that are absent in the PacBio data. To remedy that, we will simply remove the first 4nts from all the Loop sequences:
+```{r}
+sq.loop.full <- getSequences(st)
+sq.loop.trunc <- substr(sq.loop.full, 5, nchar(sq.loop.full))
+any(duplicated(sq.loop.trunc)) # FALSE
+if(mean(grepl("^TCAG", sq.loop.full)) < 0.95) stop("Trim issue, expected 4nt sequence not at start of these sequences.")
+st.loop <- st; tax.loop <- tax
+colnames(st.loop) <- sq.loop.trunc; rownames(tax.loop) <- sq.loop.trunc
+```
+
+As a first pass, looking at the overlap in ASVs and reads between Loop and PacBio full-length 16S data (replicate 2) on each sample:
+```{r}
+setASV <- function(unq.loop, unq.pb) {
+  unq.loop <- getUniques(unq.loop); unq.loop <- unq.loop[unq.loop > 0]
+  unq.pb <- getUniques(unq.pb); unq.pb <- unq.pb[unq.pb > 0]
+  c(Loop=sum(!names(unq.loop) %in% names(unq.pb)), 
+    Shared=sum(names(unq.loop) %in% names(unq.pb)),
+    PacBio=sum(!names(unq.pb) %in% names(unq.loop)))
+}
+t(sapply(sam.names, function(nm) setASV(st.loop[nm,], st2.pb[nm,])))
+```
+
+Half or more of the denoised ASVs are shared across the methods. How about on a per-read basis?
+```{r}
+setReads <- function(unq.loop, unq.pb) {
+  unq.loop <- getUniques(unq.loop); unq.loop <- unq.loop[unq.loop > 0]
+  unq.pb <- getUniques(unq.pb); unq.pb <- unq.pb[unq.pb > 0]
+  c(Loop=sum(unq.loop[!names(unq.loop) %in% names(unq.pb)]), 
+    Shared.Loop=sum(unq.loop[names(unq.loop) %in% names(unq.pb)]),
+    Shared.PacBio=sum(unq.pb[names(unq.pb) %in% names(unq.loop)]),
+    PacBio=sum(unq.pb[!names(unq.pb) %in% names(unq.loop)]))
+}
+t(sapply(sam.names, function(nm) setReads(st.loop[nm,], st2.pb[nm,])))
+```
+
+A very high fraction of reads (>85\%) occur in ASVs identified consistently by both methods. How do things look at the whole community level, when we ordinate these three samples?
+
+```{r}
+library(vegan, quietly=TRUE)
+library(ape, quietly=TRUE)
+st.loop.lab <- st.loop
+rownames(st.loop.lab) <- gsub("$", ".loop", rownames(st.loop.lab))
+st1.pb.lab <- st1.pb
+rownames(st1.pb.lab) <- gsub("$", ".pb1", rownames(st1.pb.lab))
+st2.pb.lab <- st2.pb
+rownames(st2.pb.lab) <- gsub("$", ".pb2", rownames(st2.pb.lab))
+st.both.lab <- mergeSequenceTables(st.loop.lab, st1.pb.lab, st2.pb.lab)
+ft.both.lab <- sweep(st.both.lab, 1, rowSums(st.both.lab), "/")
+bc <- vegdist(ft.both.lab, "bray")
+mds <- pcoa(bc)
+df <- data.frame(mds$vectors)
+df$Sample <- substr(rownames(df), 1, 4)
+df$Technology <- sapply(strsplit(rownames(df), "[.]"), `[`, 3)
+ggplot(data=df, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + geom_text() + theme_bw()
+```
+
+They fall almost exactly on top of each other. Worth calling out that two of these samples were longitudinal samples from the same person too, so inter-subject and within-subject temporal variability is represented here, as well as the technical replication amongst the same technology (PacBio).
+
+Comparing the measurement dissimilarities between Loop and PacBio and between the PacBio technical replicates:
+```{r}
+as.matrix(bc)[df$Sample=="R3.1", df$Sample=="R3.1"]
+as.matrix(bc)[df$Sample=="R9.3", df$Sample=="R9.3"]
+as.matrix(bc)[df$Sample=="R9.4", df$Sample=="R9.4"]
+```
+
+In Sample R3.1 the PacBio technical replicates are highly similar, but in the other two samples the Loop measurement is about as similar to each PacBio technical replicate as the PacBio technical replicates are to each other!
+
+## Demonstration of LoopSeq Accuracy using 16S conservation patterns
+
+Natural samples re closer in complexity and composition thatn are mock communities to the types of samples in which people want to employ technologies like LoopSeq full-length. However, unlike in mock communities, we do not know the true compposition of natural samples, and thus accuracy is more difficult to determine in natural samples. Here we will attempt to evaluate the accuracy of LoopSeq FL 16S in natural human fecal samples by leveraging the variable levels at which different sections of the 16S rRNA gene are evolutionarily conserved. In short, we expect the differences between legitimate biological variants to preferentially be found in the variable regions of the 16S rRNA gene, while artefactual variation introduced by technical error processes will not.
+
+We'll use [the external program ssu-align(http://eddylab.org/software/ssu-align/) for this purpose, which uses Infernal to align potentially large collectiosn of SSU rRNA sequences. 
+
+First we'll run the program on an example sequence, to show its output:
+```{r}
+ssu.exe <- "~/Desktop/ssu-align-0.1.1/src/ssu-align" # CHANGE ME...
+ssu.dir <- "/usr/local/share/ssu-align-0.1.1"
+export.str <- paste0('export SSUALIGNDIR="', ssu.dir, '";') # Prepend to all ssu-align calls
+# i <- 2 has just 1 sub, for testing
+d1 <- dd[[1]]
+i <- 2
+bs <- d1$birth_subs[d1$birth_subs$clust==i,]
+sq <- d1$sequence[[i]]
+tf <- "temp/tempfile.fa"
+writeFasta(sq, tf)
+td <- "temp/tmp"
+system(paste(export.str, ssu.exe, '-f', tf, td))
+```
+
+At the end of the program, the key file we are interested in is the bacterial alignment, which is the alignment of the input sequences against the bacterial SSU RNA model. Inspecting the formate of that file:
+```{r}
+print(substr(readLines("temp/tmp/tmp.bacteria.stk"), 1, 80))
+```
+
+There are four lines of output. The first is the aligned sequence itself, converted to the RNA ACGU code. The second line gives "posterior probabilities" of the confidence of the alignment at that position. The third gives the secondary structure consensus at that position, i.e. is there expected to be a basepairing (indicated by various brackets) or not (gaps). Finally, the fourth line is what we are interested in, this shows the level of conservation of that nucleotide position in the model, with well-conserved positions in uppercase, and less-conserved positions in lower-case.
+
+So, we can use this file to determine the fraction of differences between the second dada-denoised ASV and the first that occurred in conserved positions.
+
+```{r}
+bps <- c("A", "C", "G", "U", "a", "c", "g", "u")
+caps <- c("A", "C", "G", "U")
+ln <- readLines("temp/tmp/tmp.bacteria.stk")
+sqa <- strsplit(ln[[4]], "")[[1]]
+refcons <- strsplit(ln[[7]], "")[[1]]
+keep <- sqa %in% bps
+sqa <- sqa[keep]
+if(!gsub("U", "T", toupper(paste0(sqa, collapse=""))) == sq) { # TRUE
+  stop("Aligned sequence not matching input sequence!")
+}
+sqcons <- refcons[keep] %in% caps
+#### !!!!
+## BIG QESTION: ARE THE BIRTH-SUB COORDINATES THE POSITION IN THE REF SEQ OR THE NEW SEQ?
+## WON'T MATTER IF FOCUSING ON CLOSE SEQS (~NO INDELS) BUT WILL FOR MORE DIFFERENT SEQS
+#### !!!!
+bs$cons <- sqcons[bs$pos]
+table(sqcons)/sum(table(sqcons))
+table(bs$cons)/sum(table(bs$cons))
+```
+
+So in this example, there are a very slightly higher fraction of subsitutions in non-conserved read positions in the differences between the top two ASVs than would be expected by chance, but it is a very slight difference.
+
+Functionalizing this operation, and then extending it to a larger set of denoised ASVs:
+```{r}
+get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu.exe, export=export.str) {
+  bs <- dd$birth_subs[dd$birth_subs$clust==i,]
+  sq <- dd$sequence[[i]]
+  writeLines(c(paste0(">Sq", i), sq), tf)
+  system(paste(export, ssu, '-f', tf, td), ignore.stdout=TRUE)
+  bps <- c("A", "C", "G", "U", "a", "c", "g", "u")
+  caps <- c("A", "C", "G", "U")
+  alfile <- file.path(td, paste0(basename(td), ".bacteria.stk"))
+  if(file.exists(alfile)) {
+    ln <- readLines(file.path(td, "tmp.bacteria.stk"))
+    sqa <- strsplit(ln[[4]], "")[[1]]
+    refcons <- strsplit(ln[[7]], "")[[1]]
+    keep <- sqa %in% bps
+    sqa <- sqa[keep]
+    sqa.tr <- gsub("U", "T", toupper(paste0(sqa, collapse="")))
+    PAD <- 0
+    if(!sqa.tr == sq) {
+      ### cat("\n", sq, sqa.tr, sep="\n")
+      if(sqa.tr == substr(sq,1,nchar(sqa.tr))) {
+        cat("Aligned sequence is missing some trailing nucleotides:", nchar(sq)-nchar(sqa.tr), "\n")
+      } else if(sqa.tr == substr(sq,1+nchar(sq)-nchar(sqa.tr),nchar(sq))) {
+        PAD <- nchar(sq)-nchar(sqa.tr)
+        cat("Aligned sequence is missing some beginning nucleotides:", PAD, "\n")
+      } else { 
+        stop("Input sequence didn't match aligned sequence.")
+      }
+    }
+    sqcons <- refcons[keep] %in% caps
+    if(PAD > 0) { # NEED to fix for when aligned sequence starts later...
+      sqcons <- c(rep(NA, PAD), sqcons)
+    }
+    bs$cons <- sqcons[bs$pos] 
+  } else { # Didn't match database, give NAs to all
+    bs$cons <- NA
+  }
+  return(bs)
+}
+```
+
+Testing the function:
+```{r}
+rbind(get_subcons(3, d1), get_subcons(4, d1), get_subcons(5, d1))
+```
+
+Output is matching the expected format, this is a `data.frame` with information on the position, substitution type and quality score associated with various dada-denoised ASVs. Interestingly, all of the substitutions between these denoised ASVs and the more abundant ASVs from which they were disciminated occurrsed in non-conserved base positions! Now to see if that pattern is something that holds up over the dataset.
+
+First, running `dada` with a very aggressive sensitivity setting. Our goal here is to use `dada` to order ASVs by the diagnostic likelihood that they are true (under the DADA2 error model). We will then evaluate the conservation patterns of those ordered ASVs. First, to generate them:
+
+```{r}
+dd5 <- dada(filt, err, OMEGA_A=1e-5, DETECT_SINGLETONS=TRUE, multi=TRUE, verbose=0)
+dd5
+```
+
+Now let's run our identication of conservation patterns on all these ASVs:
+```{r}
+nseqs <- function(x) length(getSequences(x)) # 
+cons.rds <- file.path(path.rds, "cons_16S_Fecal.rds") # RDS save/load to speed up reruns of the code
+if(!file.exists(cons.rds)) {
+  di<-dd5[[1]]; system.time(con1 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
+  di<-dd5[[2]]; system.time(con2 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
+  di<-dd5[[3]]; system.time(con3 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
+  cons <- list(con1, con2, con3); names(cons) <- names(dd5)
+  saveRDS(cons, cons.rds)
+  system('rm -Rf temp/tmp')
+  system('rm temp/*')
+}
+```
+
+```{r}
+cons <- readRDS(cons.rds)
+if(!all.equal(sapply(cons, length), sapply(dd5, function(x) nseqs(x)-1))) stop("Number of cons ASVs mismatch.")
+##system.time(con1 <- lapply(seq(2, nseqs(dd5[[1]])), get_subcons, dd=dd5[[1]]))
+```
+
+
+
+
+
+
+
+
+

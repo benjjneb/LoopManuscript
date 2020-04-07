@@ -1,7 +1,7 @@
 ---
 title: "Evaluationg LoopSeq 16S on Zymo Mock"
 author: "BJC"
-date: "11/6/2019"
+date: "3/30/2020"
 output: html_document
 ---
 
@@ -9,10 +9,11 @@ output: html_document
 
 Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
 ```{r, echo=FALSE}
-library(dada2); packageVersion("dada2") # Should be 1.13.1 or later
+library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.13.1 or later
 library(ShortRead, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
 library(reshape2, quietly=TRUE)
+set.seed(100)
 setwd("~/LoopManuscript") # CHANGE ME to the location of this file
 path <- "~/LoopData/16S/Zymo" # CHANGE ME to the location of the fastq files
 path.fig <- "Figures" # Relative path to where figures should be saved
@@ -60,7 +61,7 @@ rbind(FWD.Primer = sapply(allOrients(FWD), primerHits, fn = fn),
 
 The FWD and REV primers are found in their expected orientations in the vast majority of the reads (~19k/21k) as expected.
 
-Remove the primers (and any flanking sequence) from the reads:
+Remove the primers (and any flanking sequence) from the reads, and filter out reads that don't contain both primers:
 ```{r}
 nop <- file.path(path, "nop", basename(fn))
 out <- removePrimers(fn, nop, FWD, rc(REV), verbose=TRUE)
@@ -77,7 +78,7 @@ The low-quality long-read tail was removed, but it still appears worthwhile to e
 
 Filter the sequences and enforce minimum/maximum lengths appropriate for full-length 16S:
 ```{r}
-filt <- file.path("filtered", basename(fn))
+filt <- file.path(path, "filtered", basename(fn))
 track <- filterAndTrim(nop, filt, maxEE=2, minLen=1400, maxLen=1600, verbose=TRUE)
 ```
 
@@ -120,8 +121,6 @@ plotErrors(err, nominalQ=TRUE)
 
 It would be preferable to have more data than this, especially given the seemingly very low error rates, but this is decent matching between the error model and the data. Possible improvements to the DADA2 loess error model fitting could be made in how it is working at the highQ tail, where the slightly degraded fitting is probably driven by the interaction between weighted fitting and the very high fraction of maximum quality scores.
 
-# Accuracy of DADA2 ASVs on Zymo mock community
-
 Denoise the filtered data into ASVs, using current DADA2 defaults, except for `OMEGA_C=0` to correct all reads (for the purpose of identifying all errors later one):
 ```{r}
 dd <- dada(filt, err, multi=TRUE, OMEGA_C=0)
@@ -136,6 +135,8 @@ table(tax[,"Genus"], useNA="ifany")
 ```
 
 All are from the expected genera of the Zymo mock community.
+
+# Accuracy of DADA2 ASVs on Zymo mock community
 
 Create barplot of ASVs genome-scaled abundances by genus. *Note: code in this section is slightly modified from that used in Callahan et al, NAR, 2019 on PacBio full-length 16S sequencing.*
 ```{r}
@@ -615,7 +616,7 @@ Officially recommend a `maxEE=0.5` filter for Loop data. At a loss of ~10% of re
 
 Implement this recommendation, and evaluate high-sensitivity DADA2:
 ```{r}
-filt.opt <- file.path("filtered", "optimized", basename(fn))
+filt.opt <- file.path(path, "filtered", "optimized", basename(fn))
 track.opt <- filterAndTrim(nop, filt.opt, maxEE=0.5, minLen=1400, maxLen=1600, verbose=TRUE)
 ```
 
@@ -630,20 +631,5 @@ dd.opt$clustering[!dd.opt$sequence %in% refs, -1]
 It's not perfect, but it's not far off! Just 4 singleton ASVs sneak through with those high sensitivity settings used.
 
 ```{r}
-foo <- lapply(dd.opt$sequence[28:length(dd.opt$sequence)], assign.ref)
+sessionInfo()
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
