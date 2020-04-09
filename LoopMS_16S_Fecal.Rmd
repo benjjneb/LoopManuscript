@@ -240,7 +240,7 @@ export.str <- paste0('export SSUALIGNDIR="', ssu.dir, '";') # Prepend to all ssu
 d1 <- dd[[1]]
 i <- 2
 bs <- d1$birth_subs[d1$birth_subs$clust==i,]
-sq <- d1$sequence[[i]]
+sq <- d1$sequence[d1$clustering$birth_from[i]] # Positions are in birth (ref) seq
 tf <- "temp/tempfile.fa"
 writeFasta(sq, tf)
 td <- "temp/tmp"
@@ -270,21 +270,23 @@ if(!gsub("U", "T", toupper(paste0(sqa, collapse=""))) == sq) { # TRUE
 sqcons <- refcons[keep] %in% caps
 #### !!!!
 ## BIG QESTION: ARE THE BIRTH-SUB COORDINATES THE POSITION IN THE REF SEQ OR THE NEW SEQ?
-## WON'T MATTER IF FOCUSING ON CLOSE SEQS (~NO INDELS) BUT WILL FOR MORE DIFFERENT SEQS
+## ANSWER: They are the coords in the ref-seq, qual score is (correctly) from the right pos in the new seq tho
 #### !!!!
 bs$cons <- sqcons[bs$pos]
 table(sqcons)/sum(table(sqcons))
 table(bs$cons)/sum(table(bs$cons))
 ```
 
-So in this example, there are a very slightly higher fraction of subsitutions in non-conserved read positions in the differences between the top two ASVs than would be expected by chance, but it is a very slight difference.
+So in this example, there are a much higher fraction of subsitutions in non-conserved read positions in the differences between the top two ASVs than would be expected by chance!
 
 Functionalizing this operation, and then extending it to a larger set of denoised ASVs:
 ```{r}
 get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu.exe, export=export.str) {
   bs <- dd$birth_subs[dd$birth_subs$clust==i,]
-  sq <- dd$sequence[[i]]
-  writeLines(c(paste0(">Sq", i), sq), tf)
+  i.from <- dd$clustering$birth_from[[i]] # Sub positions are in ASV that this one was born from
+  bs$from <- i.from
+  sq <- dd$sequence[[i.from]]
+  writeLines(c(paste0(">Sq", i.from), sq), tf)
   system(paste(export, ssu, '-f', tf, td), ignore.stdout=TRUE)
   bps <- c("A", "C", "G", "U", "a", "c", "g", "u")
   caps <- c("A", "C", "G", "U")
@@ -318,6 +320,7 @@ get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu
   }
   return(bs)
 }
+nseqs <- function(x) length(getSequences(x))
 ```
 
 Testing the function:
@@ -330,19 +333,19 @@ Output is matching the expected format, this is a `data.frame` with information 
 First, running `dada` with a very aggressive sensitivity setting. Our goal here is to use `dada` to order ASVs by the diagnostic likelihood that they are true (under the DADA2 error model). We will then evaluate the conservation patterns of those ordered ASVs. First, to generate them:
 
 ```{r}
-dd5 <- dada(filt, err, OMEGA_A=1e-5, DETECT_SINGLETONS=TRUE, multi=TRUE, verbose=0)
-dd5
+dd2 <- dada(filt, err, OMEGA_A=1e-2, DETECT_SINGLETONS=TRUE, multi=TRUE, verbose=0)
+dd2
 ```
 
 Now let's run our identication of conservation patterns on all these ASVs:
 ```{r}
-nseqs <- function(x) length(getSequences(x)) # 
 cons.rds <- file.path(path.rds, "cons_16S_Fecal.rds") # RDS save/load to speed up reruns of the code
 if(!file.exists(cons.rds)) {
-  di<-dd5[[1]]; system.time(con1 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
-  di<-dd5[[2]]; system.time(con2 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
-  di<-dd5[[3]]; system.time(con3 <- lapply(seq(2, nseqs(di)), get_subcons, dd=di))
-  cons <- list(con1, con2, con3); names(cons) <- names(dd5)
+  system.time(cons <- lapply(names(dd2), function(nm) {
+    di <- dd2[[nm]]
+    lapply(seq(2, nseqs(di)), get_subcons, dd=di)
+  }))
+  names(cons) <- names(dd2)
   saveRDS(cons, cons.rds)
   system('rm -Rf temp/tmp')
   system('rm temp/*')
@@ -351,15 +354,78 @@ if(!file.exists(cons.rds)) {
 
 ```{r}
 cons <- readRDS(cons.rds)
-if(!all.equal(sapply(cons, length), sapply(dd5, function(x) nseqs(x)-1))) stop("Number of cons ASVs mismatch.")
+if(!all(sapply(cons, length) == sapply(dd2, function(x) nseqs(x)-1))) stop("Number of cons ASVs mismatch.")
 ##system.time(con1 <- lapply(seq(2, nseqs(dd5[[1]])), get_subcons, dd=dd5[[1]]))
 ```
 
+Now to curate the SSU conservation data into a data.frame:
+```{r}
+clustdfs <- lapply(names(dd2), function(nm) {
+  di <- dd2[[nm]]; coni <- cons[[nm]]
+  rdf <- di$clustering[-1,] # Dropping first ASV for simplicity
+  rdf$cons <- sapply(coni, function(x) sum(x$cons, na.rm=TRUE)) 
+  # NAs occur when only part of the ASVs aligns to the ssu-align RNA model
+  rdf$vars <- sapply(coni, function(x) sum(!x$cons, na.rm=TRUE))
+  rdf$nsub <- sapply(coni, function(x) nrow(x))
+  rdf$ncat <- rdf$cons + rdf$vars # The number of substitutions categorized as conserved/variable
+  rdf$var.frac <- rdf$vars/rdf$ncat
+  rdf$index <- seq(2,nrow(rdf)+1)
+  rdf$sample <- nm
+  rdf
+})
+names(clustdfs) <- names(dd2)
+```
 
+Now some exploration of the distribution of the conserved/variable ratio, as a function of the order of the ASVs (which reflects decreasing confidence by DADA2 they are not seqeuencing error) and by the abundance of the denonised ASVs:
+```{r}
+clustdf <- do.call(rbind, clustdfs)
+clustdf$logp <- log10(clustdf$birth_pval)
+clustdf$rlogp <- log10(clustdf$birth_pval + min(clustdf$birth_pval[clustdf$birth_pval>0]))
+clustdf$sample <- sapply(strsplit(clustdf$sample, "_"), `[`, 1)
+clustdf$abundance <- as.numeric(clustdf$abundance)
+theme_set(theme_bw())
+hist(clustdf$ncat, 100)
+p <- ggplot(data=clustdf, aes(x=cons, y=vars)) + 
+  xlab("Substitutions at Conserved Positions") + ylab("Substitutions at Variable Positions") +
+  geom_abline(col="grey80", intercept=0, slope=1) + 
+  geom_abline(col="red", intercept=0, slope=0.25, linetype="dashed")
+sz.scale <- scale_size_continuous(breaks=c("1"=1, "10"=10, "100"=100, "1000"=1000), name="ASV abundance")
+p + aes(size=abundance) + geom_point(alpha=0.2) + sz.scale
+p + aes(size=abundance) + geom_point(alpha=0.2) + sz.scale + scale_x_log10() + scale_y_log10()
+p4 <- p + aes(size=abundance) + geom_point(alpha=0.2) + facet_wrap(~sample) + sz.scale
+p4
+ggsave(file.path(path.fig, "Fecal_VarVsCons.pdf"), p4, width=7, heigh=3.2, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Fecal_VarVsCons.png"), p4, width=7, heigh=3.2, units="in")
+#require(hexbin)
+#p + geom_hex()
+#p + geom_bin2d()
+```
 
+There are two modes here. The first mode contains ASVs with very large numbers of substitution differences (>100) from the ASV from which they were discriminated. In this large-difference mode, the number of substitutiosn at conserved positions exceed the number of substitutions at variable positions by about a factor of 1.5x. The second mode contains ASVs with small to moderate numbers of substitution differences (<100, mostly <10) from the ASV from which they were disciminated. In this small-difference mode, the number of substitutions at conserved positions seems to be slightly less than at variable positions. Remember that ~80\% of the positions are conserved (red-dashed line) so this is strongly skewed against what would be expected by chance.
 
+Our goals here are to determine the level to which biological differences can be disciminated from Loop sequencing errors in real complex data from these human fecal samples. Thus, we are primarily interested in that small-substitution part of the data -- it has already been established that the per-nucleotide error rate in LoopSeq data is extremely low and is not introducing hundreds of substitutions. So, focusing in on that part of the data:
 
+```{r}
+p1 <- ggplot(data=clustdf[clustdf$ncat==1,]) + aes(x=index, y=var.frac, size=abundance, weight=abundance) + sz.scale
+p1 + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+p2 <- ggplot(data=clustdf[clustdf$ncat==2,]) + aes(x=index, y=var.frac, size=abundance, weight=abundance) + sz.scale
+p2 + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+pdef <- ggplot(data=clustdf[clustdf$abundance>2 & clustdf$birth_pval < 1e-40,]) + aes(x=index, y=var.frac, size=abundance, weight=abundance) + sz.scale
+pdef + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat>10,], aes(x=index, y=var.frac, size=abundance, weight=abundance)) + geom_point(alpha=0.4) + geom_smooth() + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<10,], aes(x=index, y=var.frac, size=abundance, weight=abundance)) + geom_point(alpha=0.4) + geom_smooth() + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$abundance > 1 & clustdf$ncat>5 & clustdf$ncat<80,], aes(x=index, y=var.frac, size=abundance, weight=ncat)) + geom_point() + geom_smooth() + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$abundance == 1 & clustdf$ncat<80,], aes(x=index, y=var.frac, size=abundance)) + geom_point(alpha=0.4) + geom_smooth() + facet_wrap(~sample)
+```
 
+```{r}
+ggplot(data=clustdf[clustdf$ncat<3,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<4,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<5,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<3,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<4,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+ggplot(data=clustdf[clustdf$ncat<5,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
+```
 
 
 
