@@ -10,9 +10,12 @@ output: html_document
 Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
 ```{r, echo=FALSE}
 library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.13.1 or later
+library(Biostrings, quietly=TRUE)
 library(ShortRead, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
 library(reshape2, quietly=TRUE)
+library(vegan, quietly=TRUE)
+library(ape, quietly=TRUE)
 set.seed(100)
 setwd("~/LoopManuscript") # CHANGE ME to the location of this file
 path <- "~/LoopData/16S/CallahanFecal" # CHANGE ME to the location of the fastq files
@@ -44,8 +47,8 @@ allOrients <- function(primer) {
     # Create all orientations of the input sequence
     require(Biostrings)
     dna <- DNAString(primer)
-    orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
-        RevComp = reverseComplement(dna))
+    orients <- c(Forward = dna, Complement = Biostrings::complement(dna), Reverse = Biostrings::reverse(dna), 
+        RevComp = Biostrings::reverseComplement(dna))
     return(sapply(orients, toString))  # Convert back to character vector
 }
 primerHits <- function(primer, fn) {
@@ -170,34 +173,80 @@ colnames(st.loop) <- sq.loop.trunc; rownames(tax.loop) <- sq.loop.trunc
 
 As a first pass, looking at the overlap in ASVs and reads between Loop and PacBio full-length 16S data (replicate 2) on each sample:
 ```{r}
-setASV <- function(unq.loop, unq.pb) {
-  unq.loop <- getUniques(unq.loop); unq.loop <- unq.loop[unq.loop > 0]
-  unq.pb <- getUniques(unq.pb); unq.pb <- unq.pb[unq.pb > 0]
-  c(Loop=sum(!names(unq.loop) %in% names(unq.pb)), 
-    Shared=sum(names(unq.loop) %in% names(unq.pb)),
-    PacBio=sum(!names(unq.pb) %in% names(unq.loop)))
+setASV <- function(unq1, unq2, nms) {
+  unq1 <- getUniques(unq1); unq1 <- unq1[unq1 > 0]
+  unq2 <- getUniques(unq2); unq2 <- unq2[unq2 > 0]
+  rval <- c(sum(!names(unq1) %in% names(unq2)), 
+            sum(names(unq1) %in% names(unq2)),
+            sum(!names(unq2) %in% names(unq1)))
+  names(rval) <- c(nms[[1]], "Shared", nms[[2]])
+  rval
 }
-t(sapply(sam.names, function(nm) setASV(st.loop[nm,], st2.pb[nm,])))
+t(sapply(sam.names, function(nm) setASV(st.loop[nm,], st1.pb[nm,], nms=c("Loop", "PB1"))))
+t(sapply(sam.names, function(nm) setASV(st.loop[nm,], st2.pb[nm,], nms=c("Loop", "PB2"))))
+t(sapply(sam.names, function(nm) setASV(st1.pb[nm,], st2.pb[nm,], nms=c("PB1", "PB2"))))
+```
+
+```{r}
+library(VennDiagram)
+grid.draw(draw.triple.venn(ncol(st.loop), ncol(st1.pb), ncol(st2.pb), 
+                 sum(getSequences(st.loop) %in% getSequences(st1.pb)),
+                 sum(getSequences(st1.pb) %in% getSequences(st2.pb)),
+                 sum(getSequences(st.loop) %in% getSequences(st2.pb)),
+                 sum(getSequences(st.loop) %in% getSequences(st1.pb) & getSequences(st.loop) %in% getSequences(st2.pb)), 
+                 category = c("Loop", "PB1", "PB2"),
+                 fill = c("blue", "red", "green")))
+grid.newpage()
 ```
 
 Half or more of the denoised ASVs are shared across the methods. How about on a per-read basis?
 ```{r}
-setReads <- function(unq.loop, unq.pb) {
-  unq.loop <- getUniques(unq.loop); unq.loop <- unq.loop[unq.loop > 0]
-  unq.pb <- getUniques(unq.pb); unq.pb <- unq.pb[unq.pb > 0]
-  c(Loop=sum(unq.loop[!names(unq.loop) %in% names(unq.pb)]), 
-    Shared.Loop=sum(unq.loop[names(unq.loop) %in% names(unq.pb)]),
-    Shared.PacBio=sum(unq.pb[names(unq.pb) %in% names(unq.loop)]),
-    PacBio=sum(unq.pb[!names(unq.pb) %in% names(unq.loop)]))
+setReads <- function(unq1, unq2, nms) {
+  unq1 <- getUniques(unq1); unq1 <- unq1[unq1 > 0]
+  unq2 <- getUniques(unq2); unq2 <- unq2[unq2 > 0]
+  rval <- c(sum(unq1[!names(unq1) %in% names(unq2)]), 
+            sum(unq1[names(unq1) %in% names(unq2)]),
+            sum(unq2[names(unq2) %in% names(unq1)]),
+            sum(unq2[!names(unq2) %in% names(unq1)]))
+  names(rval) <- c(nms[[1]], paste0("Shared", nms[[1]]), paste0("Shared", nms[[2]]), nms[[2]])
+  rval
 }
-t(sapply(sam.names, function(nm) setReads(st.loop[nm,], st2.pb[nm,])))
+totReads <- function(st1, st2) { as.matrix(cbind(rowSums(st1), rowSums(st1), rowSums(st2), rowSums(st2))) }
+
+tab.loop.pb1 <- t(sapply(sam.names, function(nm) setReads(st.loop[nm,], st1.pb[nm,], nms=c("Loop", "PB1"))))
+tab.loop.pb1
+tab.loop.pb1/totReads(st.loop, st1.pb)
+tab.loop.pb2 <- t(sapply(sam.names, function(nm) setReads(st.loop[nm,], st2.pb[nm,], nms=c("Loop", "PB2"))))
+tab.loop.pb2
+tab.loop.pb2/totReads(st.loop, st2.pb)
+tab.pb1.pb2 <- t(sapply(sam.names, function(nm) setReads(st1.pb[nm,], st2.pb[nm,], nms=c("PB1", "PB2"))))
+tab.pb1.pb2
+tab.pb1.pb2/totReads(st1.pb, st2.pb)
+```
+
+REMOVE? Venn diagram doesn't work, at least not naively, when the number of reads in shared ASVs (or their proportion) differs between the sets being compared. That is, should the area of the Loop/PB1 cross-over region be the number of Loop reads in those shared ASVs, or the number of PB1 reads in those shared ASVs? Alternatively, need to do read-by-read matching, but that's not our purpose here, not trying to delve into variation in abundance esimates of common ASVs by these methods...
+```
+library(VennDiagram)
+make.ft <- function(x) { sweep(x, 1, rowSums(x), "/") }
+ft.loop <- make.ft(st.loop); ft1.pb <- make.ft(st1.pb); ft2.pb <- make.ft(st2.pb)
+sq.loop <- getSequences(st.loop); sq.pb1 <- getSequences(st1.pb); sq.pb2 <- getSequences(st2.pb)
+sq.loop.pb1 <- intersect(sq.loop, sq.pb1)
+sq.loop.pb2 <- intersect(sq.loop, sq.pb2)
+sq.pb1.pb2 <- intersect(sq.pb1, sq.pb2)
+sq.all <- intersect(sq.loop.pb1, sq.pb2)
+grid.draw(draw.triple.venn(sum(ft.loop), sum(ft1.pb), sum(ft2.pb), 
+                 mean(sum(ft.loop[,sq.loop.pb1]), sum(ft1.pb[,sq.loop.pb1])),
+                 mean(sum(ft1.pb[,sq.pb1.pb2]), sum(ft2.pb[,sq.pb1.pb2])),
+                 mean(sum(ft.loop[,sq.loop.pb2]), sum(ft2.pb[,sq.loop.pb2])),
+                 mean(sum(ft.loop[,sq.all]), sum(ft1.pb[,sq.all]), sum(ft2.pb[,sq.all])),
+                 category = c("Loop", "PB1", "PB2"),
+                 fill = c("blue", "red", "green")))
+grid.newpage()
 ```
 
 A very high fraction of reads (>85\%) occur in ASVs identified consistently by both methods. How do things look at the whole community level, when we ordinate these three samples?
 
 ```{r}
-library(vegan, quietly=TRUE)
-library(ape, quietly=TRUE)
 st.loop.lab <- st.loop
 rownames(st.loop.lab) <- gsub("$", ".loop", rownames(st.loop.lab))
 st1.pb.lab <- st1.pb
@@ -211,7 +260,17 @@ mds <- pcoa(bc)
 df <- data.frame(mds$vectors)
 df$Sample <- substr(rownames(df), 1, 4)
 df$Technology <- sapply(strsplit(rownames(df), "[.]"), `[`, 3)
-ggplot(data=df, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + geom_text() + theme_bw()
+df$Technology <- c(loop="LoopSeq", pb1="PacBio S/P2-C2/5.0", pb2="PacBio S/P3-C3/5.0")[df$Technology]
+ppb <- ggplot(data=df, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + theme_bw()
+ppb + geom_text(alpha=0.8)
+labdf <- df[df$Technology=="LoopSeq",]
+labdf$Axis.1 <- 0.8*labdf$Axis.1 # pull labels towards middle of plot
+labdf$Axis.2 <- 0.8*labdf$Axis.2
+ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black")
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.pdf"), ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
+       width=5, height=3, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.png"), ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
+       width=5, height=3, units="in")
 ```
 
 They fall almost exactly on top of each other. Worth calling out that two of these samples were longitudinal samples from the same person too, so inter-subject and within-subject temporal variability is represented here, as well as the technical replication amongst the same technology (PacBio).
@@ -281,7 +340,7 @@ So in this example, there are a much higher fraction of subsitutions in non-cons
 
 Functionalizing this operation, and then extending it to a larger set of denoised ASVs:
 ```{r}
-get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu.exe, export=export.str) {
+get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu.exe, export=export.str, return.all.pos=FALSE) {
   bs <- dd$birth_subs[dd$birth_subs$clust==i,]
   i.from <- dd$clustering$birth_from[[i]] # Sub positions are in ASV that this one was born from
   bs$from <- i.from
@@ -318,7 +377,10 @@ get_subcons <- function(i, dd, tf = "temp/tempfile.fa", td = "temp/tmp", ssu=ssu
   } else { # Didn't match database, give NAs to all
     bs$cons <- NA
   }
-  return(bs)
+  if(return.all.pos) { # Return vector of conservation at all positions, not those associated with the birth substitutions
+    return(sqcons)
+  }
+  else { return(bs) } # Return birth_subs data.frame, now with conservation state of each position added in the $cons column
 }
 nseqs <- function(x) length(getSequences(x))
 ```
@@ -376,7 +438,16 @@ clustdfs <- lapply(names(dd2), function(nm) {
 names(clustdfs) <- names(dd2)
 ```
 
-Now some exploration of the distribution of the conserved/variable ratio, as a function of the order of the ASVs (which reflects decreasing confidence by DADA2 they are not seqeuencing error) and by the abundance of the denonised ASVs:
+For comparison, we also want to know the average fraction of positions that are conserved if chosen at random (rather than at the positions of birth substutitions). To calculate that:
+```{r}
+ii <- sample(nseqs(d1), 20)
+cons.all <- lapply(ii, get_subcons, dd=d1, return.all.pos=TRUE)
+sapply(cons.all, mean)
+```
+
+Yep. Quite consistent, a bit over 80/% of the positiosn are conserved.
+
+Now some exploration of the distribution of the conserved/variable ratio, as a function of the order of the ASVs (which reflects decreasing confidence by DADA2 they are not seqeuencing error) and by the abundance of the denoised ASVs:
 ```{r}
 clustdf <- do.call(rbind, clustdfs)
 clustdf$logp <- log10(clustdf$birth_pval)
@@ -403,7 +474,20 @@ ggsave(file.path(path.fig, "Fecal_VarVsCons.png"), p4, width=7, heigh=3.2, units
 
 There are two modes here. The first mode contains ASVs with very large numbers of substitution differences (>100) from the ASV from which they were discriminated. In this large-difference mode, the number of substitutiosn at conserved positions exceed the number of substitutions at variable positions by about a factor of 1.5x. The second mode contains ASVs with small to moderate numbers of substitution differences (<100, mostly <10) from the ASV from which they were disciminated. In this small-difference mode, the number of substitutions at conserved positions seems to be slightly less than at variable positions. Remember that ~80\% of the positions are conserved (red-dashed line) so this is strongly skewed against what would be expected by chance.
 
-Our goals here are to determine the level to which biological differences can be disciminated from Loop sequencing errors in real complex data from these human fecal samples. Thus, we are primarily interested in that small-substitution part of the data -- it has already been established that the per-nucleotide error rate in LoopSeq data is extremely low and is not introducing hundreds of substitutions. So, focusing in on that part of the data:
+Does this enrichment of substitutions at variable positions hold for even the most difficult to identify ASVs, singletons and single-substitution variants?
+```{r}
+is.var.1diff <- as.logical(clustdf$vars[clustdf$ncat==1])
+table(is.var.1diff)
+```
+
+```{r}
+frac.var.1abund <- clustdf$var.frac[clustdf$abundance==1]
+hist(frac.var.1abund, n=100)
+```
+
+Yep, for both categories the number of substitutions at variable positions is about equal to those at conserved positions.
+
+Our goals here are to determine the level to which biological differences can be discriminated from Loop sequencing errors in real complex data from these human fecal samples. Thus, we are primarily interested in that small-substitution part of the data -- it has already been established that the per-nucleotide error rate in LoopSeq data is extremely low and is not introducing hundreds of substitutions. So, focusing in on that part of the data, is there a trend towards decreasing accuracy (i.e. a lower fraction of substutions at variable positions) as we push the sensitivity of ASV inference (i.e. look at lower-certainty ASVs)?
 
 ```{r}
 p1 <- ggplot(data=clustdf[clustdf$ncat==1,]) + aes(x=index, y=var.frac, size=abundance, weight=abundance) + sz.scale
@@ -419,13 +503,10 @@ ggplot(data=clustdf[clustdf$abundance == 1 & clustdf$ncat<80,], aes(x=index, y=v
 ```
 
 ```{r}
+ggplot(data=clustdf[clustdf$ncat<2,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
 ggplot(data=clustdf[clustdf$ncat<3,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
 ggplot(data=clustdf[clustdf$ncat<4,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
 ggplot(data=clustdf[clustdf$ncat<5,], aes(x=index, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
-ggplot(data=clustdf[clustdf$ncat<3,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
-ggplot(data=clustdf[clustdf$ncat<4,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
-ggplot(data=clustdf[clustdf$ncat<5,], aes(x=logp, y=var.frac, size=abundance)) + geom_smooth() + geom_point(alpha=0.4) + facet_wrap(~sample)
 ```
 
-
-
+There is some dropoff in the fraction of substitutions at variable positions as we get to the later ASVs identified using these very high sensitivity parameters, but not that much really.
