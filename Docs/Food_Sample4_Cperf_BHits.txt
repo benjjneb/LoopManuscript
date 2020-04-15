@@ -1,0 +1,62 @@
+ASV	Description	MaxScore	TotalScore	QueryCover	Evalue	PerIdent	Accession
+# BLAST results on Apr 14, 2020 against nt, no exclusions
+#ASV1
+ASV1	Clostridium perfringens strain KM-1 16S ribosomal RNA gene, partial sequence	2658	2658	100%	0.0	100.00%	MK156683.1
+ASV1	Clostridium perfringens D Tokyo_Cp_TypeD gene for 16S ribosomal RNA, partial sequence	2658	2658	100%	0.0	100.00%	LC386311.1
+ASV1	Clostridium perfringens strain JXJA17 chromosome, complete genome	2658	26490	100%	0.0	100.00%	CP028149.1
+ASV1	Clostridium perfringens strain NCTC13170 genome assembly, chromosome: 1	2658	26462	100%	0.0	100.00%	LS483393.1
+ASV1	Clostridium perfringens strain EHE-NE18 chromosome, complete genome	2658	26479	100%	0.0	100.00%	CP025501.1
+ASV1	Clostridium perfringens ATCC 13124 16S ribosomal RNA, complete sequence	2658	2658	100%	0.0	100.00%	NR_121697.2
+ASV1	Clostridium perfringens strain LLY_N11 chromosome, complete genome	2658	26445	100%	0.0	100.00%	CP023410.1
+ASV1	Clostridium perfringens strain CP15 genome	2658	26453	100%	0.0	100.00%	CP019468.1
+ASV1	Clostridium perfringens strain Del1 genome	2658	26427	100%	0.0	100.00%	CP019576.1
+ASV1	Clostridium perfringens isolate MGYG-HGUT-02372 genome assembly, chromosome: 1	2658	26479	100%	0.0	100.00%	LR698985.1
+ASV1	Clostridium perfringens DNA, complete genome, strain: CBA7123	2658	26518	100%	0.0	100.00%	AP017630.1
+ASV1	Clostridium perfringens strain JP55, complete genome	2658	26468	100%	0.0	100.00%	CP010993.1
+ASV1	Clostridium perfringens gene for 16S ribosomal RNA, partial sequence	2658	2658	100%	0.0	100.00%	AB566417.1
+ASV1	Clostridium perfringens ATCC 13124, complete genome	2658	21190	100%	0.0	100.00%	CP000246.1
+ASV1	Clostridium perfringens str. 13 DNA, complete genome	2658	26442	100%	0.0	100.00%	BA000016.3
+ASV1	Clostridium perfringens rrnB operon (16S rRNA, 23S rRNA, 5S rRNA) genes, complete sequences	2658	2658	100%	0.0	100.00%	AB045283.1
+#ASV2
+ASV2	Clostridium perfringens strain NCTC13170 genome assembly, chromosome: 1	2658	26473	100%	0.0	100.00%	LS483393.1
+ASV2	Clostridium perfringens strain CP15 genome	2658	26464	100%	0.0	100.00%	CP019468.1
+ASV2	Clostridium perfringens DNA, complete genome, strain: CBA7123	2658	26506	100%	0.0	100.00%	AP017630.1
+ASV2	Clostridium perfringens strain E090 16S ribosomal RNA gene, partial sequence	2658	2658	100%	0.0	100.00%	JX267106.1
+#ASV3
+ASV3	Clostridium perfringens strain NCTC13170 genome assembly, chromosome: 1	2658	26440	100%	0.0	100.00%	LS483393.1
+#ASV4
+ASV4	Clostridium perfringens strain DSM 106278 16S ribosomal RNA gene, partial sequence	2658	2658	100%	0.0	100.00%	MN537509.1
+ASV4	Clostridium perfringens strain 4928STDY7387940 genome assembly, chromosome: 1	2658	2849	100%	0.0	100.00%	LR607374.1
+ASV4	Clostridium perfringens strain JXJA17 chromosome, complete genome	2658	26490	100%	0.0	100.00%	CP028149.1
+ASV4	Clostridium perfringens strain NCTC2837 genome assembly, chromosome: 1	2658	26473	100%	0.0	100.00%	LS483461.1
+ASV4	Clostridium perfringens isolate MGYG-HGUT-02372 genome assembly, chromosome: 1	2658	26501	100%	0.0	100.00%	LR698985.1
+ASV4	Clostridium perfringens DNA, complete genome, strain: CBA7123	2658	26506	100%	0.0	100.00%	AP017630.1
+ASV4	Clostridium perfringens strain FORC_003, complete genome	2658	26473	100%	0.0	100.00%	CP009557.1
+ASV4	Clostridium perfringens ATCC 13124 16S ribosomal RNA gene, partial sequence	2658	2658	100%	0.0	100.00%	KP326373.1
+ASV4	Clostridium perfringens strain JCM 1290 16S ribosomal RNA, partial sequence	2658	2658	100%	0.0	100.00%	NR_113204.1
+ASV4	Clostridium perfringens strain BB5-8 16S ribosomal RNA gene, partial sequence	2658	2658	100%	0.0	100.00%	FJ215334.1
+ASV4	Clostridiaceae bacterium bSSV11 gene for 16S ribosomal RNA, partial sequence	2658	2658	100%	0.0	100.00%	AB264618.2
+#ASV5
+ASV5	Clostridium perfringens strain NCTC2837 genome assembly, chromosome: 1	2658	26429	100%	0.0	100.00%	LS483461.1
+ASV5	Clostridium perfringens strain EHE-NE18 chromosome, complete genome	2658	26445	100%	0.0	100.00%	CP025501.1
+ASV5	Clostridium perfringens strain LLY_N11 chromosome, complete genome	2658	26423	100%	0.0	100.00%	CP023410.1
+ASV5	Clostridium perfringens strain CP15 genome	2658	26464	100%	0.0	100.00%	CP019468.1
+ASV5	Clostridium perfringens isolate MGYG-HGUT-02372 genome assembly, chromosome: 1	2658	26468	100%	0.0	100.00%	LR698985.1
+ASV5	Clostridium perfringens ATCC 13124, complete genome	2658	21178	100%	0.0	100.00%	CP000246.1
+#ASV6
+ASV6	Clostridium perfringens strain LLY_N11 chromosome, complete genome	2658	26401	100%	0.0	100.00%	CP023410.1
+ASV6	Clostridium perfringens ATCC 13124, complete genome	2658	21167	100%	0.0	100.00%	CP000246.1
+#ASV7
+ASV7	Clostridium perfringens strain NCTC13170 genome assembly, chromosome: 1	2658	26373	100%	0.0	100.00%	LS483393.1
+ASV7	Clostridium perfringens strain LLY_N11 chromosome, complete genome	2658	26357	100%	0.0	100.00%	CP023410.1
+ASV7	Clostridium perfringens strain JP55, complete genome	2658	26379	100%	0.0	100.00%	CP010993.1
+#ASV8
+ASV8	Clostridium perfringens strain NCTC2837 genome assembly, chromosome: 1	2652	26351	100%	0.0	99.93%	LS483461.1
+ASV8	Clostridium perfringens strain LLY_N11 chromosome, complete genome	2652	26324	100%	0.0	99.93%	CP023410.1
+ASV8	Clostridium perfringens strain JP55, complete genome	2652	26346	100%	0.0	99.93%	CP010993.1
+ASV8	Clostridium perfringens ATCC 13124, complete genome	2652	21112	100%	0.0	99.93%	CP000246.1
+#ASV9
+ASV9	Clostridium perfringens strain NCTC13170 genome assembly, chromosome: 1	2658	26440	100%	0.0	100.00%	LS483393.1
+ASV9	Clostridium perfringens strain EHE-NE18 chromosome, complete genome	2658	26434	100%	0.0	100.00%	CP025501.1
+ASV9	Clostridium perfringens strain Del1 genome	2658	26394	100%	0.0	100.00%	CP019576.1
+ASV9	Clostridium perfringens ATCC 13124, complete genome	2658	21167	100%	0.0	100.00%	CP000246.1
