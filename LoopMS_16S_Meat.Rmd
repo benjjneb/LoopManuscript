@@ -1,5 +1,5 @@
 ---
-title: "Evaluationg LoopSeq 16S on Retail Meat Samples"
+title: "Evaluationg LoopSeq 16S on Rinsate from Retail Meat Samples"
 author: "BJC"
 date: "4/13/2020"
 output: html_document
@@ -434,12 +434,247 @@ unname(colSums(st[,sq.ec]))
 Essentially no E. coli in the first 3 samples. Then E. ecoli abundance is dominated by samples 4/6, with 5 having an OOM or 2 fewer reads. A long tail of singletons ASVs. But also a lot of ASVs with significant abundance (e.g. 10+).
 
 ```{r}
-unname(st[,sq.ec[colSums(st[,sq.ec])>=10]])
+unname(st[4:6,sq.ec[colSums(st[,sq.ec])>=8]])
 ```
 
-Sample 4 is full of E. coli, in different strains!
+Sample 4 is full of E. coli, in several different strains. Sample 5 looks like it has a couple low abundance strains of E. coli. Sample 6 has at least a couple relatively abundant E. coli strains. However, separating the ASVs out by strain is not going to be trivial, especially in Sample 4. *E. coli* has 7 rrn genes.
 
+Starting with Sample 6, let's dig further into the abundant strains:
+```{r}
+unq.ec6 <- getUniques(st[6, sq.ec])
+unq.ec6.ab <- unq.ec6[unq.ec6 > 80]
+unq.ec6.ab <- sort(unq.ec6.ab, decreasing=TRUE)
+dada2:::pfasta(getSequences(unq.ec6.ab), id=paste("Sample6 E. coli ASV, Abundance", unq.ec6.ab))
+```
 
+```{r}
+hitdf.ec6 <- read.table("Docs/Food_Sample6_AbundantEcoli_BHits.txt", sep="\t", header=TRUE, comment="#", stringsAsFactors=FALSE)
+sort(table(hitdf.ec6$Description), decreasing=TRUE)[1:20]
+sort(table(hitdf.ec6$Accession), decreasing=TRUE)[1:20]
+```
+
+9 hits on that top one? How? Oh... the Description isn't unique, multiple accessions with that Description. Annoying.
+
+```{r}
+foo <- hitdf.ec6[!duplicated(hitdf.ec6$Accession),]
+desc.map <- foo$Description
+names(desc.map) <- foo$Accession
+acc <- "CP023349.1"
+desc.map["CP023349.1"]
+hitdf.ec6$Sequence[hitdf.ec6$Accession == "CP023349.1"]
+```
+
+Let's take a look at what ASVs are matching the top accessions (4+ hits and above):
+```{r}
+bar <- sort(table(hitdf.ec6$Accession), decreasing=TRUE)
+accdf <- data.frame(Accession=names(bar), Hits=as.vector(bar), stringsAsFactors = FALSE)
+accdf$Description <- desc.map[accdf$Accession]
+for(asv in paste0("ASV", seq_along(unq.ec6.ab))) {
+  accdf[,asv] <- sapply(accdf$Accession, function(acc) { 
+    any(hitdf.ec6$Accession==acc & hitdf.ec6$Sequence==asv) 
+  })
+}
+head(accdf)
+```
+
+ASVs 1/4/5/6/9 are the pattern for three of the 5-hit accessions. As a remninder of the abundances here:
+
+```{r}
+unname(unq.ec6.ab)[c(1,4,5,6,9)]
+```
+
+Not completely obvious how these land on integerish values, but remember also that there may be overlap in some of these ASVs (e.g. ASV1).
+
+```{r}
+sapply(colnames(accdf)[c(-1,-2,-3)], function(nm) sum(accdf[,nm]))
+table(hitdf.ec6$Sequence)[paste0("ASV", seq_along(unq.ec6.ab))]
+```
+
+Interestingly ASVs 8/10/11/12 are particularly unique:
+```{r}
+accdf[accdf$ASV8 | accdf$ASV10 | accdf$ASV11 | accdf$ASV12,]
+```
+
+ASV8 never shows up with any of ASV1-7. The pattern ASV8/11/12 shows up three times. There is also one 8/10/12.
+
+```{r}
+unname(unq.ec6.ab)[c(8,11,12)]
+unname(unq.ec6.ab)[c(8,10,12)]
+```
+
+Not obvious 7-copy integer values, but not out of the question either (e.g. 4:2:1).
+
+Two of those 3-hit accessions (2014C-3338 & 2009C-3133) are Shiga-toxic, but the other two have no tblastn hits for Shiga toxin subunit A (ALL90389.1) or Shiga toxin subunit B (ALL90390.1).
+
+Looking more systematically at the co-occurences between these ASVs as best hits in accessions:
+```{r}
+asvs <- paste0("ASV", seq_along(unq.ec6.ab))
+names(asvs) <- asvs
+outer(asvs, asvs, Vectorize(function(x, y) sum(accdf[,x] & accdf[,y])))
+```
+
+Woah, ASV1 and ASV9 always co-occur? That's interesting. Heck, could be a 6:1 ASV1/ASV9 type in there. Let's try pulling that component out:
+
+```{r}
+foo <- accdf[!accdf$ASV1 & !accdf$ASV9,]
+outer(asvs[c(-1, -9)], asvs[c(-1, -9)], Vectorize(function(x, y) sum(foo[,x] & foo[,y])))
+```
+
+So, ASV8/10/11/12 are their own component. We'll call that a unique strain:
+
+```{r}
+unname(unq.ec6.ab)[c(8,10,11,12)]
+```
+
+There's a 3:2:1:1 ratio. 7 alleles.
+
+Pulling that out:
+
+```{r}
+exclude <- c("ASV1", "ASV8", "ASV9", "ASV10", "ASV11", "ASV12")
+keep <- c(2,3,4,5,6,7)
+foo <- accdf[!accdf$ASV1 & !accdf$ASV8 & !accdf$ASV9 & !accdf$ASV10 & !accdf$ASV11 & !accdf$ASV12,]
+outer(asvs[keep], asvs[keep], Vectorize(function(x, y) sum(foo[,x] & foo[,y])))
+foo <- accdf[!accdf$ASV1 & !accdf$ASV8 & !accdf$ASV9 & !accdf$ASV10 & !accdf$ASV11 & !accdf$ASV12 & accdf$Hits > 1,]
+outer(asvs[keep], asvs[keep], Vectorize(function(x, y) sum(foo[,x] & foo[,y])))
+v <- unname(unq.ec6.ab)[keep]
+v
+av <- unname(asvs[keep])
+```
+
+I don't know, probably two strains... but how are they mixed together?
+
+```{r}
+N <- 2
+combos <- combn(6,N)
+bar <- t(apply(combos, 2, function(i) 7*v[i]/sum(v[i])))
+data.frame(av[combos[1,]], av[combos[2,]], bar)
+resid <- apply(bar, 1, function(xx) sum(abs(xx - round(xx))))
+plot(resid)
+```
+
+```{r}
+combos[,order(resid)]
+```
+
+Huh I didn't quiet realize how precisely 4:3 that ASV2/ASV3 or ASV2/ASV4 are, as well as ASV5/ASV6.
+
+So... ASV2/3, ASV4/7 and ASV5/6 divide up the counts into pretty close to 4:3 ratios (ASV4/7 the furthest off). But do those double combos occur in BLAST best-hit table? The pairwise combos do, but do they also have other ASVs in them?
+
+```{r}
+foo <- accdf[!accdf$ASV1 & !accdf$ASV8 & !accdf$ASV9 & !accdf$ASV10 & !accdf$ASV11 & !accdf$ASV12,]
+comat <- 1*as.matrix(foo[,av])
+comat[!duplicated(comat),]
+```
+
+No, only ASV2/3 exist amonst those two-ASV combos.
+
+```{r}
+sq.ec6.ab <- getSequences(unq.ec6.ab); names(sq.ec6.ab) <- asvs
+outer(sq.ec6.ab, sq.ec6.ab, nwhamming, vec=TRUE)
+outer(sq.ec6.ab[keep], sq.ec6.ab[keep], nwhamming, vec=TRUE)
+```
+
+I don't know, I'm just not feeling that confident of anything other than the 8/10/11/12 that is so well supported by co-occurrence on accessions (although the full 4 never shows up), the 3:2:1:1 abundance ratio, and their internal seq similarity and external sequence divergence with the rest of the E. coli sequences.
+
+## Pub figures
+
+First let's plot the relative abundances and identities of the CDC key foodborne pathogens in these 6 samples: Yersinia enterolitica, E. coli (Escherichia/Shigella), Salmonella enterica, Clostridium perfringens (Clostridium_sensu_stricto_1), Campylobacter and Listeria monocytogenes.
+```{r}
+tt <- tax
+tt <- cbind(tt, Species=NA)
+tt[sq.yent,"Species"] <- "Y. enterolitica"
+tt[sq.Cperf,"Species"] <- "C. perfringens"
+tt[sq.salm,"Species"] <- "S. enterica"
+tt[sq.ec,"Species"] <- "E. coli"
+sum(tt[,"Genus"] %in% "Campylobacter")
+sum(tt[,"Genus"] %in% "Listeria")
+table(tt[,"Species"], useNA="ifany")
+```
+
+OK, so we have our 6 species, only 4 of which are present. Let's make a relative abundance barplot showing their relative abundances in these samples:
+```{r}
+ft <- sweep(st, 1, rowSums(st), "/")
+#is.path <- tt[,"Species"] %in% c("Y. enterolitica", "C. perfringens", "S. enterica", "E. coli", "L. monocytogenes", "Campylobacter sp.")
+#table(is.path)
+spec.path <- c("Y. enterolitica", "C. perfringens", "S. enterica", "E. coli", "L. monocytogenes", "Campylobacter sp.")
+suppressWarnings(ftp <- colsum(ft, group=tt[,"Species"])) # Throws a warning because of the NAs in species, this is OK
+ftp <- ftp[,colnames(ftp) %in% spec.path]
+ftp
+```
+
+```{r}
+dfp <- cbind(data.frame(Sample=substr(rownames(ftp), 1, 3), stringsAsFactors=FALSE), 
+             data.frame(ftp, stringsAsFactors=FALSE))
+dfpm <- melt(dfp, id.vars="Sample", variable.name="Species", value.name="Proportion") ### WARNING: Auto-converts the variable name to a FACTOR
+dfpm$Species <- as.character(dfpm$Species)
+dfpm$Species <- gsub("[.]{2}", ". ", dfpm$Species)
+dfpm$Species <- factor(dfpm$Species, levels=spec.path)
+#dfpm$Species <- tt[dfpm$Sequence,"Species"]
+table(dfpm$Species, useNA="ifany")
+```
+
+```{r}
+fill.scale.path <- scale_fill_manual(values=c("C. perfringens"="#1b9e77", "E. coli"="#d95f02", "S. enterica"="#7570b3", 
+                                              "Y. enterolitica"="#e7298a", "L. monocytogenes"="tomato4", "Campylobacter sp."="#e6ab02"),
+                                     name="Pathogenic\nspecies", drop=FALSE)
+ppp <- ggplot(data=dfpm, aes(x=Sample, y=Proportion, fill=Species)) + geom_col(width=0.4) + ylim(0,1) + 
+  fill.scale.path + theme_bw() + theme(panel.grid=element_blank())
+ppp
+ggsave(file.path(path.fig, "Meat_PathogenProportions.pdf"), ppp, width=5, height=3, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_PathogenProportions.png"), ppp, width=5, height=3, units="in")
+```
+
+Let's return to C. perfringens as an example of high-res full complement "ribotyping" that is possible with this method. Recall the distribution of C. perfringens ASVs:
+```{r}
+unname(st[,sq.Cperf])
+```
+
+We are interested ine visualizing the "ribotype" of the strain in Sample 4 that spans Cperf ASVs 1-9, with a 2:1(x8) ratio of alleles consistent with the 10 copies of the rrn in Cperf genomes.
+
+```{r}
+library(DECIPHER)
+library(ggmsa) # On CRAN, also needs BioC treeio package
+sq.Cpstrain <- sq.Cperf[1:9]
+dna.Cpstrain <- DNAStringSet(sq.Cpstrain)
+rna.Cpstrain <- DNAStringSet(dna.Cpstrain)
+aln <- AlignSeqs(rna.Cpstrain) # align with RNA secondary structure
+names(aln) <- paste0("Cperf", seq_along(sq.Cpstrain))
+aln
+```
+
+```{r}
+## Exxample ggmsa code o pget things working
+#library(seqmagick)
+#ggmsa(sequences, 320, 360, font = NULL, color = "Clustal")
+```
+
+Testing ggmsa nucleotide color schemes:
+```{r}
+clrs <- c('Clustal', 'Chemistry_NT', 'Shapely_NT', 'Zappo_NT', 'Taylor_NT')
+for(clr in clrs) {
+  print(ggmsa(aln, 100, 200, font = NULL, color = clr))
+}
+```
+
+Scannings 100nt chunks to see where some diffs are for the publication plot:
+```{r, warnings=FALSE, message=FALSE}
+lst <- min(nchar(aln))
+for(start in seq(1, 1500, 100)) {
+  print(ggmsa(aln, start, min(lst, start+99), font = NULL, color = 'Shapely_NT'))
+}
+```
+
+Almost all the diffs are in V1/V2 it seems (about postiions 50-75 and 150-190 in these sequences, which start at ~E. coli coordinate position 27, which overlap the V1 and V2 E. coli positions according to https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2562909/).
+
+Maybe just plot V2 using those coords:
+
+```{r}
+pmsa <- ggmsa(aln, 137-27, 242-27, font = NULL, color = 'Shapely_NT') + ggtitle("C. perfringen alleles, V2 hypervariable region")
+pmsa
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.pdf"), pmsa, width=8, height=1.2, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.png"), pmsa, width=8, height=1.2, units="in")
+```
 
 
 
