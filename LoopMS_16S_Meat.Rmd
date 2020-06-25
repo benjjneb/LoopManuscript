@@ -56,12 +56,12 @@ Final inspection of the quality profile:
 plotQualityProfile(filt)
 ```
 
-Final progress of reads through filtering and trimming:
+Final progress of reads through full-length primer enforcement and filtering/trimming:
 ```{r}
-cbind(raw=out[,1], primers=out[,2], filtered=track[,2])
+cbind(raw=out[,1], full.len=out[,2], filtered=track[,2])
 ```
 
-Note that GB8 in particular had a large fraction (~80\%) of reads lost due to a failure to detect both primers.
+Few reads lost to quality filtering. Note that GB8 in particular had a large fraction (~80\%) of reads lost due to a failure to detect both primers.
 
 # Denoising
 
@@ -99,6 +99,283 @@ tax <- readRDS(tax.rds)
 if(!identical(getSequences(tax), getSequences(st))) stop("Taxonomy mismatch.")
 ```
 
+## Species-level assignment of CDC foodborne pathogens
+
+Here we are going to focus on 6 species of foodborne pathogens that are known to commonly occur in retail meat according to the CDC:
+
+*Campylobacter: https://www.cdc.gov/campylobacter/faq.html
+*Clostridium perfringens: https://www.cdc.gov/foodsafety/diseases/clostridium-perfringens.html (some strains)
+*E. coli: https://www.cdc.gov/ecoli/ (STEC, EHEC, ETEC, Diarrheagenic types)
+*Listeria monocytogenes: https://www.cdc.gov/listeria/index.html
+*Salmonella enterica: https://www.cdc.gov/salmonella/ (some serotypes, esp Enteritidis, Typhimurium, Newport, and Javiana)
+*Yersinia enterocolitica: https://www.cdc.gov/yersinia/
+
+First we'll look for the presence of these bacterial genera in our samples (which to this point have only been assigned taxonomy down to the genus level).
+
+```{r}
+genera.path <- c("Campylobacter",
+                 "Clostridium_sensu_stricto_1", # The Silva 132 genus of C. perfringens
+                 "Escherichia/Shigella",
+                 "Listeria",
+                 "Salmonella",
+                 "Yersinia")
+genera.path %in% tax[,"Genus"]
+```
+
+*Campylobacter* and *Listeria* were not detected in our data. We would like to make species-level assignments for the four pathogenic genera that were in our data, to determine if the pathogen species is there and not a congeneric. This will be done by hand via manual inspection of BLAST searches of the relevant ASVs, so as to avoid any questions about how effectively current species-level assignment tools perform.
+
+### Yersinia (enterocolitica)
+```{r}
+sq.yers <- getSequences(st)[tax[,"Genus"] %in% "Yersinia"]
+names(sq.yers) <- paste0("Yersinia", seq_along(sq.yers))
+unname(colSums(st[,sq.yers]))
+```
+
+The abundance of Yersinia ASVs drops off quickly. For convenience we'll just do by-hand species assignments for the top 32 (i.e. all Yersinia ASVs with at least an abundance of 4 across all samples).
+```{r}
+## dada2:::pfasta(sq.yers[1:32])
+## BLAST against nt
+spec.yers <- c("enterocolitica", # 100
+               "enterocolitica",
+               "enterocolitica",
+               "intermedia", # 100
+               "intermedia", # 100
+               "intermedia",
+               "intermedia",
+               "intermedia",
+               "kristensenii", # 100
+               "intermedia", # 100  -- 10th seq
+               "intermedia", # 100
+               "intermedia",
+               "intermedia",
+               "intermedia", #100
+               "intermedia",
+               "intermedia",
+               "intermedia",
+               "intermedia", #100
+               "enterocolitica", # 100
+               "frederiksenii", # -- 20th seq
+               "enterocolitica",
+               "enterocolitica",
+               "enterocolitica",
+               "frederiksenii", # 10-off
+               "intermedia",
+               "enterocolitica", # end of query not included (5% of read)
+               "kristensenii",
+               "enterocolitica",
+               "intermedia", # 8-off of intermedia/kristensenii/aldovae, but cooccur patterns say intermedia
+               "enterocolitica", # -- 30th seq
+               "enterocolitica",
+               "frederiksenii")
+names(spec.yers) <- sq.yers[1:length(spec.yers)]
+```
+
+All Yersinia ASVs were able to be relatively unambiguously assigned to a specific species, with the arguable exception of Yerisinia29, which was resolved by looking at the co-occurence patterns between that ASV and other unambiguously assigned Yerisina ASVs.
+
+*Y. enterocolitica* is the main foodborne pathogen of concern here, the other Yersinias are not or very rarely associated with disease in humans.
+
+### Salmonella
+
+```{r}
+sq.salm <- getSequences(tax)[tax[,"Genus"] %in% "Salmonella"]
+uncolname <- function(x) { y <- x; colnames(y) <- NULL; y }
+uncolname(st[,sq.salm])
+```
+
+Interesting, *Salmonella* only shows up in one sample, and in very even counts across 7 ASVs. That is consistent with the 7 rrn copies that *Salmonella* has according to rrndb. So, what is that strain?
+
+```{r}
+## dada2:::pfasta(sq.salm)
+## BLAST against nt
+spec.salm <- c("enterica",
+               "enterica",
+               "enterica",
+               "enterica",
+               "enterica",
+               "enterica",
+               "enterica")
+names(spec.salm) <- sq.salm
+```
+
+All Salmonella ASVs are unambiguously *S. enterica* subsp. *enterica*.
+
+Within that (sub-)species, some ASVs (e.g. 1 and 2) are not very discriminative, but Salmonella enterica subsp. enterica serovar Newport strain CFSAN003387, complete genome (https://www.ncbi.nlm.nih.gov/nucleotide/CP016014.1?report=genbank&log$=nucltop&blast_rank=37&RID=9CCPUEXF014) is the best match (usually tied with many others) for every single ASV. All are exact matches except ASV4 (2-off). ASV6 is the key intra-species disciminator, as this Newport accession is the only exact match to that ASV.
+
+### Clostridium (perfringens)
+
+```{r}
+sq.Css1 <- getSequences(st)[tax[,"Genus"] %in% "Clostridium_sensu_stricto_1"]
+uncolname(st[,sq.Css1])
+```
+
+This genus only shows up in sample GT10 with any frequency, but also shows up at low numbers in CB28 and GT8.
+
+```{r}
+## dada2:::pfasta(sq.Css1) # C. perfringens group
+## BLAST against nt
+spec.Css1 <- c("perfringens", # 100
+"perfringens",
+"perfringens",
+"perfringens", # 100
+"perfringens",
+"perfringens",
+"perfringens",
+"perfringens",
+"perfringens",
+"septicum", # SEQ 10
+"perfringens",
+"perfringens",
+"septicum",
+"septicum",
+"perfringens",
+"perfringens",
+"perfringens", # 23-off
+"perfringens",
+"perfringens",
+"perfringens", # SEQ 20
+"septicum",
+"perfringens")
+names(spec.Css1) <- sq.Css1
+```
+
+Most of the ASVs are unambiguously assigned to *C. perfringens*, but some are clearly the related *C. septicum* (not a pathogen concern).
+
+### Escherichia/Shigella coli
+
+```{r}
+sq.ec<- getSequences(tax)[tax[,"Genus"] %in% "Escherichia/Shigella"]
+unname(colSums(st[,sq.ec]))
+```
+
+The abundance of Escherichia/Shigella ASVs drops off quickly. Using the same standard as before, we'll take a look at the first 68 ASVs, representing all ASVs with at least 4 reads study-wide.
+
+```{r}
+## dada2:::pfasta(sq.ec[1:68])
+## BLAST against nt
+# First 60 all e. coli except 10/39/41/42/51/54/55/68, Shigella also i top hits
+# 66: E.coli and E. fergusonii in top hits
+```
+
+The results here require some quick unpacking. First, the vast majority of these ASVs have *E. coli* and only *E. coli* among their top hits and can be unambiguously assigned to the *E. coli* species. Sequences 10, 39, 41, 42, 51, 54, 55 and 68 have both *E. coli* and some species of *Shigella* among their top hits. However, given the (in)famous status of *Shigella* as a parphyletic genus entirely contained within the *E. coli* species, and that this well-known inconsistency only remains due to the historical and clinical usage of those names, we simply consider these as *E. coli* here. Finally, a single sequences 66 has both *E. coli* and *E. fergusonii* in its top hits, thus cannot be unambiguously assigned to the species level.
+
+```{r}
+spec.ec <- rep("coli", 68)
+spec.ec[66] <- NA
+names(spec.ec) <- sq.ec[1:68]
+```
+
+```{r}
+uncolname(st[,sq.ec[1:68]])
+```
+
+Essentially no *E. coli* in the first 3 samples. *E. coli* abundance is high in GT10 and GT8, however, with the numbers of ASVs present in each suggesting multiple *E. coli* strains present in each sample (*E. coli* has 7 copies of the 16S rRNA gene, so at most 7 alleles per strain). 
+
+## Figures
+
+First let's plot the relative abundances and identities of the CDC key foodborne pathogens in these 6 samples: Yersinia enterolitica, E. coli (Escherichia/Shigella), Salmonella enterica, Clostridium perfringens (Clostridium_sensu_stricto_1), Campylobacter and Listeria monocytogenes.
+```{r}
+tt <- tax
+tt <- cbind(tt, Species=NA)
+tt[names(spec.yers),"Species"] <- spec.yers
+tt[names(spec.salm),"Species"] <- spec.salm
+tt[names(spec.Css1),"Species"] <- spec.Css1
+tt[names(spec.ec),"Species"] <- spec.ec
+table(tt[,"Species"], useNA="ifany")
+```
+
+OK, so we have our taxonomy table with species defined for all the genera containing the 6 species of interest, only 4 of which are present. Let's make a relative abundance barplot showing their relative abundances of these CDC species-of-interest in these samples:
+```{r}
+ft <- sweep(st, 1, rowSums(st), "/")
+spec.nice <- c("enterocolitica"="Y. enterocolitica", 
+               "perfringens"="C. perfringens", 
+               "enterica"="S. enterica", 
+               "coli"="E. coli", 
+               "monocytogenes"="L. monocytogenes", 
+               "Campylobacter"="Campylobacter sp.")
+tt[!tt[,"Species"] %in% names(spec.nice),"Species"] <- NA # Drop non-pathogen species
+tt[!is.na(tt[,"Species"]), "Species"] <- spec.nice[tt[!is.na(tt[,"Species"]), "Species"]]
+suppressWarnings(ftp <- colsum(ft, group=tt[,"Species"])) # Throws a warning because of the NAs in species, this is OK
+ftp <- ftp[,colnames(ftp) %in% spec.nice]
+ftp
+```
+
+```{r}
+dfp <- cbind(data.frame(Sample=substr(rownames(ftp), 1, 3), stringsAsFactors=FALSE), 
+             data.frame(ftp, stringsAsFactors=FALSE))
+dfpm <- melt(dfp, id.vars="Sample", variable.name="Species", value.name="Proportion") ### WARNING: Auto-converts the variable name to a FACTOR
+dfpm$Species <- as.character(dfpm$Species)
+dfpm$Species <- gsub("[.]{2}", ". ", dfpm$Species)
+dfpm$Species <- factor(dfpm$Species, levels=spec.nice)
+```
+
+```{r}
+fill.scale.path <- scale_fill_manual(values=c("C. perfringens"="#1b9e77", "E. coli"="#d95f02", "S. enterica"="#7570b3", 
+                                              "Y. enterocolitica"="#e7298a", "L. monocytogenes"="tomato4", "Campylobacter sp."="#e6ab02"),
+                                     name="Pathogenic\nspecies", drop=FALSE)
+ppp <- ggplot(data=dfpm, aes(x=Sample, y=Proportion, fill=Species)) + geom_col(width=0.4) + ylim(0,1) + 
+  fill.scale.path + theme_bw() + theme(panel.grid=element_blank()) + theme(legend.text=element_text(face="italic"))
+ppp
+ggsave(file.path(path.fig, "Meat_PathogenProportions.pdf"), ppp, width=5, height=3, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_PathogenProportions.png"), ppp, width=5, height=3, units="in")
+```
+
+Let's return to *C. perfringens* as an example of high-res full complement "ribotyping" that is possible with this method. Recall the distribution of *C. perfringens* ASVs:
+```{r}
+sq.Cperf <- sq.Css1[spec.Css1 %in% "perfringens"]
+uncolname(st[,sq.Cperf])
+```
+
+We are interested ine visualizing the "ribotype" of the strain in Sample GT10 that spans *C. perfringens* ASVs 1-9, with a 2:1(x8) ratio of alleles consistent with the 10 copies of the 16S rRNA gene in *C. perfringens* genomes.
+
+```{r}
+library(DECIPHER)
+library(ggmsa) # On CRAN, also needs BioC treeio package
+sq.Cpstrain <- sq.Cperf[1:9]
+dna.Cpstrain <- DNAStringSet(sq.Cpstrain)
+rna.Cpstrain <- DNAStringSet(dna.Cpstrain)
+aln <- AlignSeqs(rna.Cpstrain) # align with RNA secondary structure
+names(aln) <- paste0("Cperf", seq_along(sq.Cpstrain))
+aln
+```
+
+```{r}
+## Testing ggmsa nucleotide color schemes:
+# clrs <- c('Clustal', 'Chemistry_NT', 'Shapely_NT', 'Zappo_NT', 'Taylor_NT')
+# for(clr in clrs) {
+#  print(ggmsa(aln, 100, 200, font = NULL, color = clr))
+#}
+```
+
+Scannings 100nt chunks to see where some diffs are for the publication plot:
+```{r, warnings=FALSE, message=FALSE}
+lst <- min(nchar(aln))
+for(start in seq(1, 1500, 100)) {
+  print(ggmsa(aln, start, min(lst, start+99), font = NULL, color = 'Shapely_NT'))
+}
+```
+
+Almost all the diffs are in V1/V2 it seems (about postiions 50-75 and 150-190 in these sequences, which start at ~E. coli coordinate position 27, which overlap the V1 and V2 E. coli positions according to https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2562909/).
+
+Maybe just plot V2 using those coords:
+
+```{r}
+pmsa <- ggmsa(aln, 137-27, 242-27, font = NULL, color = 'Shapely_NT') + 
+  ggtitle(expression(italic("C. perfringens")~"alleles, V2 hypervariable region")) +
+  theme(axis.text.y=element_blank()) + theme(plot.title = element_text(hjust = 0.5))
+pmsa
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.pdf"), pmsa, width=8, height=1.2, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.png"), pmsa, width=8, height=1.2, units="in")
+```
+
+
+
+
+
+
+
+
+
+
 ```{r}
 table(tax[,"Phylum"], useNA="ifany")
 ```
@@ -107,7 +384,7 @@ table(tax[,"Phylum"], useNA="ifany")
 table(tax[,"Genus"], useNA="ifany")
 ```
 
-Quite a lot of Yersinia is interesting, as that can be a foodborne pathogen, or a "commensal" or (infamously in microbiome papers) the plague. What is the abundance spectrum like?
+Quite a lot of Yersinia is interesting, as that can be a foodborne pathogen, or a "commensal" or (infamously in a couple microbiome papers) the plague. What is the abundance spectrum like?
 
 ```{r}
 sq.yers <- getSequences(st)[tax[,"Genus"] %in% "Yersinia"]
