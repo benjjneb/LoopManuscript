@@ -340,9 +340,6 @@ ggsave(file.path(path.fig, "ErrorRates_Loop.pdf"), p.err.pos, width=12, height=5
 ggsave(file.path(path.fig, "ErrorRates_Loop_1_200.pdf"), p.err.pos + xlim(1,200), width=12, height=5, units="in", useDingbats=FALSE)
 ```
 
-*Q to self: Why is there a substitution spike at position >1500?*
-*A to self: That's just a sub that happened to be at the end of the longest ASV, thus a very small denominator. i.e. just noise.*
-
 Calculate total per-base error rates of each type (substitutions, insertions, deletions) over all the reads and positions:
 ```{r}
 tapply(diffs.keep$Abund, diffs.keep$Type, sum)/sum(nnt.keep)
@@ -491,7 +488,7 @@ classify.chimera <- function(asn) {
   else if(nunq > 2) { return("Complex") } # Only doing simple chimeras
   else {
     ntransitions <- sum(asn[2:length(asn)] != asn[1:(length(asn)-1)])
-    if(ntransitions==1) { return("Bimera") } 
+    if(ntransitions==1) { return("Chimera") } 
     else if(ntransitions==2) { return("Introgression") }
     else { return("Complex") }
   }
@@ -527,11 +524,11 @@ Classify the dereplicated unique sequences into the categories described previou
 ```{r}
 classifications.nop <- rep("Uncategorized", length(sq.nop))
 is.correct.nop <- sapply(sq.nop, function(pat, x=refs) any(grepl(pat, x))) # Allows for length differences
-is.bimera.nop <- (isbim.nop | refclass.nop == "Bimera") & !is.correct.nop
+is.bimera.nop <- (isbim.nop | refclass.nop == "Chimera") & !is.correct.nop
 is.introgression.nop <- refclass.nop == "Introgression" & !is.correct.nop & !is.bimera.nop
 is.error.nop <- hams.nop <= 3 & !is.correct.nop & !is.bimera.nop & !is.introgression.nop
 classifications.nop[is.correct.nop] <- "Correct"
-classifications.nop[is.bimera.nop] <- "Bimera"
+classifications.nop[is.bimera.nop] <- "Chimera"
 classifications.nop[is.introgression.nop] <- "Introgression"
 classifications.nop[is.error.nop] <- "Point Error(s)"
 table(classifications.nop) # Unique sequences
@@ -560,7 +557,7 @@ dfr.nop <- dfr.nop[order(dfr.nop$ExpErr, dfr.nop$Classification=="Correct"),]
 
 Now let's plot the fraction of each type as a function of the expected errors threshold.
 ```{r}
-types <- c("Correct", "Bimera", "Introgression", "Point Error(s)", "Uncategorized")
+types <- c("Correct", "Chimera", "Introgression", "Point Error(s)", "Uncategorized")
 for(type in types) { dfr.nop[[type]] <- cumsum(dfr.nop$Classification == type) }
 mdfr.nop <- melt(dfr.nop, measure.vars = types, variable.name="Type", value.name="Reads")
 ggplot(data=mdfr.nop, aes(x=ExpErr, y=Reads, color=Type)) + geom_point() + xlim(0,10)
@@ -601,7 +598,7 @@ pbar <- pbar + geom_line(data=dfr.nop, aes(x=ExpErr, y=Removed*SCALE), color="re
 pbar <- pbar + scale_y_continuous(sec.axis = sec_axis(~.*1/SCALE, name="Fraction Reads Removed by Filter"))
 pbar <- pbar + theme(axis.title.y.right = element_text(color="red"), axis.text.y.right=element_text(color="red"))
 # From http://colorbrewer2.org/#type=qualitative&scheme=Paired&n=4
-color.scale <- c("Bimera"="#a6cee3", "Introgression"="#1f78b4", 
+color.scale <- c("Chimera"="#a6cee3", "Introgression"="#1f78b4", 
                  "Point Error(s)"="#b2df8a", "Uncategorized"="#33a02c")
 pbar <- pbar + geom_point() + 
   xlim(0,4) + xlab("Maximum Expected Errors Threshold") + ylab("Fraction Reads with Error") +
@@ -610,9 +607,11 @@ pbar <- pbar + geom_point() +
 pbar
 ggsave(file.path(path.fig, "ErrorsByTypeAndMaxEE.pdf"), pbar,
                  width=8, height=4, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "ErrorsByTypeAndMaxEE.png"), pbar,
+                 width=8, height=4, units="in")
 ```
 
-Officially recommend a `maxEE=0.5` filter for Loop data. At a loss of ~10% of reads, reduces structural errors to <1% of total reads, and total reads with errors to ~4% of total reads.
+Officially recommend a `maxEE=1` or less filter for Loop data. At a loss of ~10% of reads, reduces structural errors to <1% of total reads, and total reads with errors to ~4% of total reads.
 
 Implement this recommendation, and evaluate high-sensitivity DADA2:
 ```{r}

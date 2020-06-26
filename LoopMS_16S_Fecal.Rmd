@@ -260,8 +260,16 @@ mds <- pcoa(bc)
 df <- data.frame(mds$vectors)
 df$Sample <- substr(rownames(df), 1, 4)
 df$Technology <- sapply(strsplit(rownames(df), "[.]"), `[`, 3)
-df$Technology <- c(loop="LoopSeq", pb1="PacBio S/P2-C2/5.0", pb2="PacBio S/P3-C3/5.0")[df$Technology]
-ppb <- ggplot(data=df, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + theme_bw()
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+clr3 <- gg_color_hue(3)
+df$Technology <- c(loop="LoopSeq", pb1="PacBio CCS\n(S/P2-C2/5.0)\n", pb2="PacBio CCS\n(S/P3-C3/5.0)")[df$Technology]
+tech.color.scale <- c("LoopSeq"=clr3[[1]], "PacBio CCS\n(S/P2-C2/5.0)\n"=clr3[[2]], 
+                      "PacBio CCS\n(S/P3-C3/5.0)"="darkgreen")
+ppb <- ggplot(data=df, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + theme_bw() + 
+  scale_color_manual(values=tech.color.scale)
 ppb + geom_text(alpha=0.8)
 labdf <- df[df$Technology=="LoopSeq",]
 labdf$Axis.1 <- 0.8*labdf$Axis.1 # pull labels towards middle of plot
