@@ -11,6 +11,7 @@ These Rmarkdown documents have also been rendered into html format, and can be v
 * [Evaluation of LoopSeq accuracy on Zymo mock community](https://benjjneb.github.io/LoopManuscript/LoopMS_16S_Zymo.html).
 * [Evaluation of LoopSeq on Human Fecal samples, and comparison to PacBio](https://benjjneb.github.io/LoopManuscript/LoopMS_16S_Fecal.html).
 * [Identifying foodborne pathogen species from retail meat samples using LoopSeq](https://benjjneb.github.io/LoopManuscript/LoopMS_16S_Meat.html).
+* [Evaluating the error-free fraction of amplified sequencing reads as a function of read length and technology](https://benjjneb.github.io/LoopManuscript/ErrorFreeByLength.html).
 
 Questions and comments are welcome on the Issues tracker for this repository: https://github.com/benjjneb/LoopManuscript/issues
 

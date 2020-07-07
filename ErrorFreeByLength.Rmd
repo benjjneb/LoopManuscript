@@ -1,0 +1,223 @@
+---
+title: "ErrorFreeByLength"
+author: "BJC"
+date: "7/3/2020"
+output: html_document
+---
+
+## Setup
+
+Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), define the other relevant file paths for this analysis.
+```{r, echo=FALSE}
+library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.13.1 or later
+library(ShortRead, quietly=TRUE)
+library(Biostrings, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+set.seed(100)
+setwd("~/LoopManuscript") # CHANGE ME to the location of this file
+path.fun <- "~/LoopData/18SITS" # CHANGE ME to the location of the 18SITS fastq files
+path.gen <- "~/LoopData/Genomic" # CHANGE ME to the lcoation of the genomic fastq files
+path.doc <- "Docs" # Relative path to the location of the bacterial reference genomes
+path.fig <- "Figures" # Relative path to where figures should be saved
+path.rds <- "RDS" # Relative path to where RDS should be saved
+```
+
+## Fungal Analysis
+
+We are analyzing 18SITS amplicon data of DNA extracted from 6 fungal isolate obtained from the ATCC: *Saccharomyces cerevisiae* Meyen ex E.C. Hansen (ATCC 201389D-5), *Aspergillus oryzae* var. oryzae (ATCC 42149D-2), *Candida albicans* (Robin) Berkhout (ATCC10231D-5), *Trichoderma reesei* Simmons (ATCC 13631D-2), *Kluyveromyces lactis* (Dombrowski) van der Walt (ATCC 8585D-5) and *Penicillium chrysogenum* Thom (ATCC 10106D-2). These samples were all sequenced on a common LoopSeq run.
+
+Define the fungal fastq file paths.
+```{r}
+fn <- list.files(path=path.fun, pattern=".fq.gz", full.names=TRUE)
+fn
+```
+
+Define the Loop 18S-ITS Mycobiome primers (from their documentation).
+```{r}
+FWD <- "TACCTGGTTGATYCTGCCAGT"
+REV1 <- "CTBTTVCCKCTTCACTCG"
+REV2 <- "GGTTGGTTTCTTTTCCT"
+REV3 <- "TAAATTACAACTCGGAC"
+REV4 <- "TCCTCCGCTTWTTGWTWTGC"
+REV <- c(REV1, REV2, REV3, REV4)
+```
+
+Right now `removePrimers` does not handle multiple distinct primers like exist here for the reverse primers. So we'll do it by hand. First running primer removal with all four combinations of the FWD primer with each REV primer.
+
+```{r}
+nop <- lapply(seq_along(REV), function(i) file.path(dirname(fn), paste0("nop", i), basename(fn)))
+#nop <- lapply(seq_along(REV), function(i) file.path(path.fun, paste0("nop", i)))
+out <- lapply(seq_along(REV), function(i) {
+  removePrimers(fn, nop[[i]], FWD, rc(REV[[i]]))
+})
+out
+```
+
+So REV1 and REV3 have no hits in this data (may be matches to fungi outside the 6 species we are assaying here?). So we'll ignore those. But need to combine the results from REV2 and REV4, without duplicating sequences that could have been matches to both primers. (*note to self, should augment `removePrimers` to do this itself when a list of FWD or REV primers is provided*)
+
+```{r}
+nop24 <- file.path(dirname(fn), "nop", basename(fn))
+for(i in seq_along(fn)) {
+  srq2 <- readFastq(nop[[2]][i])
+  srq4 <- readFastq(nop[[4]][i])
+  id4.in2 <- id(srq4) %in% id(srq2)
+  srqo <- append(srq2, srq4[!id4.in2])
+  if(!dir.exists(dirname(nop24[i]))) dir.create(dirname(nop24[i]))
+  if(file.exists(nop24[i])) file.remove(nop24[i])
+  writeFastq(srqo, nop24[i], width=20000L)
+}
+tot <- cbind(reads.in=out[[1]][,1], all.out=sapply(nop24, function(f) length(getSequences(f))))
+tot
+```
+
+A pretty high fraction of full-length (i.e. FWD primer ot REV primer) 18SITS sequences in these data actually, more 2/3rds or more in each sample.
+
+Checking on seuqence complexities and overall quality.
+```{r}
+plotComplexity(nop24) # AOK
+```
+
+```{r}
+plotQualityProfile(nop24)
+```
+
+Everything looks good, no issues with low complexity sequences or sequence quality. Going to perform standard quality filtering, but without the length screen we imposed on full-length 16S since this amplicon varies so much more in length.
+
+```{r}
+filt <- file.path(dirname(fn), "filtered", basename(fn))
+track <- filterAndTrim(nop24, filt, maxEE=1, multi=TRUE)
+track
+```
+
+As expected, very few reads lost to filtering. Proceed with denoising, first by learning the error rates.
+
+```{r}
+err <- learnErrors(filt, multi=TRUE, verbose=0)
+plotErrors(err, nominalQ=TRUE)
+```
+
+Looks good (but not amazing, perhaps because DADA2 loess fitting could be improved).
+
+Denoise:
+```{r}
+dd <- dada(filt, err, multi=TRUE, verbose=0)
+names(dd) <- sapply(strsplit(basename(filt), "_"), `[`, 1)
+dd
+```
+
+Remarkably, just a single legitimate ASV is being inferred in all these samples (albeit with default rather than sensitive settings), save *A. oryzae* sample with 2 ASVs inferred. 
+
+```{r}
+dd[[1]]$clustering$abundance
+```
+
+And even in the *A. oryzae* sample, all of the read weight is in the first ASV.
+
+Our working assumption is that this single ASV is the correct sequence for each of these fungal genomes (this data is likely better than the available reference genomes). So, what fraction of the reads exactly match the single ASV being defined in all samples and are therefore error-free? (code accounts for possible length-variation due to different primers hitting the same sequence, i.e. FWD-REV2 or FWD-REV4 amplifications of the same sequence could be different lengths).
+
+```{r}
+sq.correct <- sapply(dd, function(x) x$sequence[[1]])
+names(sq.correct) <- names(dd)
+drp <- derepFastq(nop24)
+names(drp) <- names(dd)
+fundf <- data.frame(Length=nchar(sq.correct),
+                    ErrorFree=sapply(names(dd), function(f) {
+                      is.id <- sq.correct[[f]] == substr(getSequences(drp[[f]]), 1, nchar(sq.correct[[f]]))
+                      sum(drp[[f]]$uniques[is.id], na.rm=TRUE)/sum(drp[[f]]$uniques)
+                      }),
+                    Species=names(dd), stringsAsFactors=FALSE)
+ggplot(data=fundf, aes(x=Length, y=ErrorFree, label=Species)) + geom_label() + theme_bw()
+```
+
+In each case a single sequence in the data (modulo lenth variation between the two REV primers) accounts for over 80% of the reads, and we therefore conservatively estimate that represents the error-free fraction of the full-length sequence data, with the acceptance that we may be incorrectly counting some minor allelic variants as incorrect given that many fungi have hundred(s) of 18SITS gene copies.
+
+## Genomic Analysis
+
+Here we are analyzing randomly amplified segments from DNA isolated from bacterial isolates obtained from the ATCC: *Nitrosomonas europaea* (CATCC 19718D-5), *Desulfovibrio desulfuricans* (ATCC 27774D-5), and *Salinispora tropica* (ATCC CNB-440D-5). The reference genomes for each of these strains was downloaded from NCBI and stores in the `Docs/` directory of this repository with the following namings scheme: `Neuropaee_genome.fasta.gz`.
+
+Define the filanames to the LoopSeq fastq files and the reference genomes.
+```{r}
+fn.gen <- list.files(path.gen, pattern=".fq$", full.names=TRUE)
+names(fn.gen) <- sapply(strsplit(basename(fn.gen), "_"), `[`, 1)
+spc <- names(fn.gen)
+fn.gen
+```
+
+Define file paths to the reference fastas for the genomes of each of these species.
+```{r}
+fa.ref <- list.files(path.doc, pattern=".fasta$", full.names=TRUE)
+names(fa.ref) <- sapply(strsplit(basename(fa.ref), "_"), `[`, 1)
+fa.ref
+```
+
+Compare all the LoopSeq reads to the reference genomes, and record whether they exactly matched or not.
+```{r}
+lapply(spc, function(s) {
+  ref <- readFasta(fa.ref[s])
+  ref.seq <- sread(ref)
+  queries <- getSequences(fn.gen[[s]])
+  exact <- sapply(queries, function(q) {
+    vcountPattern(q, ref.seq) > 0 || vcountPattern(rc(q), ref.seq) > 0
+  })
+  data.frame(Exact=exact, Length=nchar(queries), Species=s, stringsAsFactors=FALSE)
+}) -> hits
+genome.hits <- do.call(rbind, hits)
+```
+
+Calculate summary accuracies and median lengths for the read length window of 4000-6000 (representative of ~5Kb target sequences size).
+```{r}
+bh5 <- genome.hits[genome.hits$Length > 4000 & genome.hits$Length < 6000,]
+gendf <- data.frame(Length=tapply(bh5$Length, bh5$Species, median), # Median lengths of reads in this window
+                    ErrorFree=tapply(bh5$Exact, bh5$Species, mean),  # Exact match fraction
+                    Species=names(tapply(bh5$Length, bh5$Species, median)),
+                    stringsAsFactors=FALSE)
+gendf
+```
+
+## Figure showing Error-free Fraction versus Length
+
+Now to integrate the results for the error-free fractions of reads by length from the different technologies and types of evidence we are including.
+
+Define data.frame that contains the measured values that will be plotted as points. Values for error-free fractions on the Zymo mock community are hard-copied here from [our analaysis of LoopSeq data](ttps://benjjneb.github.io/LoopManuscript/LoopMS_16S_Zymo.html) and [our analysis of PacBio CCS data](https://benjjneb.github.io/LRASManuscript/LRASms_Zymo.html). In both cases the error-free fraction is calculated relative to the fraction of full-length reads (i.e. reads in which both the forward and reverse primers could be detected) before any quality filtering is applied.
+
+```{r}
+errfree.16S.loop <- 0.92342982 # Copied from the analysis of the Zymo mock community in this manuscript
+errfree.16S.pbccs <- 0.5223684 # Copied from the analysis of the ZYmo mock community in Callahan et al. 2019
+len.16S <- 1450
+# Make data.frame with the point evidence
+dfp <- cbind(fundf, Evidence="Fungal 18S-ITS", Technology="LoopSeq")
+dfp <- rbind(dfp, data.frame(Length=len.16S, ErrorFree=errfree.16S.loop, Species=NA, 
+                             Evidence="Zymo 16S", Technology="LoopSeq"))
+dfp <- rbind(dfp, data.frame(Length=len.16S, ErrorFree=errfree.16S.pbccs, Species=NA,
+                             Evidence="Zymo 16S", Technology="PacBio CCS"))
+dfp <- rbind(dfp, cbind(gendf, Evidence="Genomic", Technology="LoopSeq"))
+```
+
+Now create data.frame of projected error rates as a function of the evidence from the Zymo full-length 16S analysis for LoopSeq and PacBio CCS, or the manufacturer's reported error rate for Oxford Nanopore.
+
+```{r}
+er.loop <- -log(errfree.16S.loop)/len.16S
+er.pbccs <- -log(errfree.16S.pbccs)/len.16S
+er.ont <- 0.06 # Approximate number for ONT R10 chemistry error rate as reported by the manufacturer
+
+nts <- seq(6000)
+dfer <- rbind(data.frame(Length=nts, ErrorFree=exp(-nts*er.loop), Species=NA, Evidence="Zymo 16S", Technology="LoopSeq"),
+              data.frame(Length=nts, ErrorFree=exp(-nts*er.pbccs), Species=NA, Evidence="Zymo 16S", Technology="PacBio CCS"),
+              data.frame(Length=nts, ErrorFree=exp(-nts*er.ont), Species=NA, Evidence="Zymo 16S", Technology="Oxford Nanopore"))
+```
+
+Combine the collated data into a publication figure showing the relationship between read-length and the error-free fraction.
+```{r}
+perrfree <- ggplot(data=dfer, aes(x=Length, y=ErrorFree, shape=Evidence, color=Technology)) + 
+  geom_line(linetype="dashed") +
+  geom_point(data=dfp) + ylim(0, NA) + theme_bw() + 
+  scale_shape_manual(values=c("Fungal 18S-ITS"="triangle", "Genomic"="square", "Zymo 16S"="circle")) +
+  guides(color = guide_legend(order = 1), shape = guide_legend(order = 0)) +
+  ylab("Fraction Error-free Reads") + xlab("Amplicon Length")
+perrfree
+ggsave(file.path(path.fig, "perrfree.pdf"), perrfree, 
+       width=6, height=4, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "perrfree.png"), perrfree, 
+       width=6, height=4, units="in")
+```
+
