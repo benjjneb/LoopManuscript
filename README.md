@@ -1,6 +1,6 @@
 # Reproducible Analyses from the LoopSeq Manuscript
 
-This repository hosts the reproducible workflow that performed the analyses presented in the manuscript "Ultra-accurate Amplicon Sequencing with Single-Molecule Synthetic Long Reads".
+This repository hosts the reproducible workflow that performed the analyses presented in the manuscript [Ultra-accurate Microbial Amplicon Sequencing with Synthetic Long Reads](https://www.biorxiv.org/content/10.1101/2020.07.07.192286v1).
 
 Rmarkdown documents are hosted in the root directory. The input sequencing data is not included in the repository for size reasons, and is instead [available from the SRA under BioProject Accession PRJNA644197](https://www.ncbi.nlm.nih.gov/sra/?term=PRJNA644197). Auxiliary data is included in the `Docs/` directory, RDS files holding intermediate data objects suitable for performing the analyses of the processed sequencing data are in the `RDS/` directory, and figures created by the Rmarkdown documents are in the `Figures/` directory. 
 
