@@ -606,9 +606,9 @@ pbar <- pbar + geom_point() +
   labs(color = "Error Type")
 pbar
 ggsave(file.path(path.fig, "ErrorsByTypeAndMaxEE.pdf"), pbar,
-                 width=8, height=4, units="in", useDingbats=FALSE)
+                 width=5.5, height=3, units="in", useDingbats=FALSE)
 ggsave(file.path(path.fig, "ErrorsByTypeAndMaxEE.png"), pbar,
-                 width=8, height=4, units="in")
+                 width=5.5, height=3, units="in")
 ```
 
 Officially recommend a `maxEE=1` or less filter for Loop data. At a loss of ~10% of reads, reduces structural errors to <1% of total reads, and total reads with errors to ~4% of total reads.

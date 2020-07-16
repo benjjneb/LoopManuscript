@@ -315,8 +315,8 @@ fill.scale.path <- scale_fill_manual(values=c("C. perfringens"="#1b9e77", "E. co
 ppp <- ggplot(data=dfpm, aes(x=Sample, y=Proportion, fill=Species)) + geom_col(width=0.4) + ylim(0,1) + 
   fill.scale.path + theme_bw() + theme(panel.grid=element_blank()) + theme(legend.text=element_text(face="italic"))
 ppp
-ggsave(file.path(path.fig, "Meat_PathogenProportions.pdf"), ppp, width=5, height=3, units="in", useDingbats=FALSE)
-ggsave(file.path(path.fig, "Meat_PathogenProportions.png"), ppp, width=5, height=3, units="in")
+ggsave(file.path(path.fig, "Meat_PathogenProportions.pdf"), ppp, width=6, height=2.5, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_PathogenProportions.png"), ppp, width=6, height=2.5, units="in")
 ```
 
 Let's return to *C. perfringens* as an example of high-res full complement "ribotyping" that is possible with this method. Recall the distribution of *C. perfringens* ASVs:
@@ -363,8 +363,8 @@ pmsa <- ggmsa(aln, 137-27, 242-27, font = NULL, color = 'Shapely_NT') +
   ggtitle(expression(italic("C. perfringens")~"alleles, V2 hypervariable region")) +
   theme(axis.text.y=element_blank()) + theme(plot.title = element_text(hjust = 0.5))
 pmsa
-ggsave(file.path(path.fig, "Meat_CPerf_MSA.pdf"), pmsa, width=8, height=1.2, units="in", useDingbats=FALSE)
-ggsave(file.path(path.fig, "Meat_CPerf_MSA.png"), pmsa, width=8, height=1.2, units="in")
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.pdf"), pmsa, width=6, height=1.2, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_CPerf_MSA.png"), pmsa, width=6, height=1.2, units="in")
 ```
 
 
