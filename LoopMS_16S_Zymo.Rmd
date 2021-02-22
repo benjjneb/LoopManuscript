@@ -1,7 +1,7 @@
 ---
 title: "Evaluationg LoopSeq 16S on Zymo Mock"
 author: "BJC"
-date: "3/30/2020"
+date: "2021-02-02"
 output: html_document
 ---
 
@@ -9,7 +9,7 @@ output: html_document
 
 Load libraries, set the working directory to the location of this Rmarkdown file (only necessary when running by hand), and read in filenames:
 ```{r, echo=FALSE}
-library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.13.1 or later
+library(dada2, quietly=TRUE); packageVersion("dada2")
 library(ShortRead, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
 library(reshape2, quietly=TRUE)
@@ -61,7 +61,7 @@ rbind(FWD.Primer = sapply(allOrients(FWD), primerHits, fn = fn),
 
 The FWD and REV primers are found in their expected orientations in the vast majority of the reads (~19k/21k) as expected.
 
-Remove the primers (and any flanking sequence) from the reads, and filter out reads that don't contain both primers:
+Remove the primers and any flanking sequence from the reads, and filter out reads that don't contain both primers:
 ```{r}
 nop <- file.path(path, "nop", basename(fn))
 out <- removePrimers(fn, nop, FWD, rc(REV), verbose=TRUE)
@@ -96,7 +96,7 @@ We'll do a simple scan for potential contaminants in the filtered unique sequenc
 drp.filt <- derepFastq(filt)
 tax.filt.rds <- file.path(path.rds, "tax_filt.rds") # RDS save/load to speed up reruns of the code
 if(!file.exists(tax.filt.rds)) {
-  tax.filt <- assignTaxonomy(drp.filt, "~/tax/silva_nr_v132_train_set.fa.gz", minBoot=80, multi=TRUE)
+  tax.filt <- assignTaxonomy(drp.filt, "~/tax/silva_nr99_v138_train_set.fa.gz", minBoot=80, multi=TRUE)
   saveRDS(tax.filt, tax.filt.rds)
 }
 tax.filt <- readRDS(tax.filt.rds)
@@ -138,7 +138,69 @@ All are from the expected genera of the Zymo mock community.
 
 # Accuracy of DADA2 ASVs on Zymo mock community
 
-Create barplot of ASVs genome-scaled abundances by genus. *Note: code in this section is slightly modified from that used in Callahan et al, NAR, 2019 on PacBio full-length 16S sequencing.*
+*Note: The code and approach in this section is slightly modified from that used in Callahan et al, NAR, 2019 on PacBio full-length 16S sequencing.*
+
+Print out all reads and BLAST them against nt and the (incomplete) set of SSU reference sequences provided by Zymo for these strains:
+```{r}
+asvs <- getSequences(dd)
+names(asvs) <- paste(tax[,"Genus"], seq(nrow(tax)))
+dada2:::pfasta(asvs, id=names(asvs))
+## 
+## dada2:::pfasta(asvs, id=paste(tax[,"Genus"], seq(nrow(tax))))
+## BLAST fasta against nt excluding uncultured/environmental sequences: https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastn&PAGE_TYPE=BlastSearch&BLAST_SPEC=&LINK_LOC=blasttab&LAST_PAGE=blastn
+fn.zymo.ssu <- ""
+sapply(asvs, )
+```
+
+Results of BLAST search on Feb 2, 2020 are recorded.
+
+ 1. Exact match (100% identity, 100% coverage) to S. aureus
+ 2. Exact match to S. enterica
+ 3. Exact match to E. faecalis
+ 4. Exact match to L. monocytogenes
+ 5. Exact match to B. subtilis
+ 6. Exact match to L. monocytogenes
+ 7. Exact match to P. aeruginosa
+ 8. Exact match to B. subtilis
+ 9. Exact match to E. coli
+10. Exact match to L. monocytogenes
+11. Exact match to L. fermentum
+12. Exact match to S. aureus
+13. Exact match to L. fermentum
+14. Exact match to S. aureus
+15. Exact match to B. subtilis
+16. Exact match to L. fermentum
+17. Exact match to B. subtilis
+18. Exact match to B. subtilis
+19. One mismatch to best hit (L. fermentum)
+20. Exact match to L. fermentum
+21. Exact match to E. coli
+22. Exact match to E. coli
+23. Exact match to B. subtilis
+24. Exact match to E. coli
+25. Exact match to E. coli
+26. One mismatch to best hit (S. enterica)
+27. Exact match to E. coli
+
+Store these results in R format:
+```{r}
+exact.nt <- c(TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+              TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE,TRUE,
+              TRUE, TRUE, TRUE, TRUE, TRUE, FALSE,TRUE)
+```
+
+In addition, all ASVs were were also matched exactly against the (incomplete) 16S rRNA gene sequences references provided by Zymo research with this microbial standard. The reference file queried here is derived from https://s3.amazonaws.com/zymo-files/BioPool/ZymoBIOMICS.STD.refseq.v2.zip by concatenating together the 16S fastas for each of the eight bacteria.
+
+```{r}
+fnz <- "Docs/Zymo_Bacteria_16S_v2.fasta"
+refz <- getSequences(fnz)
+exact.zymo <- sapply(asvs, function(asv) any(grepl(asv,refz)) )
+which(!exact.nt & !exact.zymo)
+```
+
+Every denoised ASV except for one (ASV19: L. fermentum) is an exact (100\% identity and 100\% coverage) match to a previously sequenced 16S rRNA gene from the expected species (re-confirmed Feb 2, 2021). ASV19 has a single-nucleotide mismatch to the closest previously sequenced L. fermentum 16S rRNA gene available in the union of the NCBI nt database and the provided Zymo SSU rRNA reference sequences.
+
+Create barplot of ASVs genome-scaled abundances by genus. 
 ```{r}
 theme_set(theme_bw())
 genusPalette <- c(Bacillus="#e41a1c", Enterococcus="#377eb8", Escherichia="#4daf4a", Lactobacillus="#984ea3",
@@ -187,9 +249,7 @@ p.stoich
 ggsave(file.path(path.fig, "ZymoASVs_Loop_DADA2Defaults.pdf"), p.stoich, width=8, height=5, units="in", useDingbats=FALSE)
 ```
 
-Just as we saw in the PacBio profiling of the Zymo mock community (NOTE: The PacBio profilling was on a different older batch of this mock community, and several strains were switched between that batch and the newer batch profiled here), the different 16S alleles occur in the integral values consistent with intra-genomic allelic variation between the expected number of 16S copies in each of these genomes. There are no errors in the denoised data.
-
-*Q for myself: Do I need to modify this so it doesn't so completely copy the visual style of the PacBio version if it will be a publication figures? I'm not exactly sure what the rules are given that the underlying data is completely different. Keeping the visual style the same makes it esaier to easily visually compare the two figures, which is nice.*
+Just as we saw in the PacBio profiling of the Zymo mock community (NOTE: The PacBio profilling was on a different older batch of this mock community, and several strains were switched between that batch and the newer batch profiled here), the different 16S alleles occur in the integral values consistent with intra-genomic allelic variation between the expected number of 16S copies in each of these genomes. We conclude from the joint evidence based on exact matching to previously sequenced genes from the same species, and from the integral ratios between alleles (including the single allele of *L. fermentum* that wasn't an exact match to a previously sequenced gene) that there are no residual errors in the denoised data.
 
 How many reads are completely error free? Consider reads before and after quality filtering and length screening, but note that both sets of reads are the subset of the raw reads that passed through the primer detection removal step.
 ```{r}

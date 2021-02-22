@@ -1,7 +1,7 @@
 ---
 title: "Evaluationg LoopSeq 16S on Human Fecal Samples"
 author: "BJC"
-date: "3/30/2020"
+date: "2021-02-11"
 output: html_document
 ---
 
@@ -187,18 +187,6 @@ t(sapply(sam.names, function(nm) setASV(st.loop[nm,], st2.pb[nm,], nms=c("Loop",
 t(sapply(sam.names, function(nm) setASV(st1.pb[nm,], st2.pb[nm,], nms=c("PB1", "PB2"))))
 ```
 
-```{r}
-library(VennDiagram)
-grid.draw(draw.triple.venn(ncol(st.loop), ncol(st1.pb), ncol(st2.pb), 
-                 sum(getSequences(st.loop) %in% getSequences(st1.pb)),
-                 sum(getSequences(st1.pb) %in% getSequences(st2.pb)),
-                 sum(getSequences(st.loop) %in% getSequences(st2.pb)),
-                 sum(getSequences(st.loop) %in% getSequences(st1.pb) & getSequences(st.loop) %in% getSequences(st2.pb)), 
-                 category = c("Loop", "PB1", "PB2"),
-                 fill = c("blue", "red", "green")))
-grid.newpage()
-```
-
 Half or more of the denoised ASVs are shared across the methods. How about on a per-read basis?
 ```{r}
 setReads <- function(unq1, unq2, nms) {
@@ -222,26 +210,6 @@ tab.loop.pb2/totReads(st.loop, st2.pb)
 tab.pb1.pb2 <- t(sapply(sam.names, function(nm) setReads(st1.pb[nm,], st2.pb[nm,], nms=c("PB1", "PB2"))))
 tab.pb1.pb2
 tab.pb1.pb2/totReads(st1.pb, st2.pb)
-```
-
-REMOVE? Venn diagram doesn't work, at least not naively, when the number of reads in shared ASVs (or their proportion) differs between the sets being compared. That is, should the area of the Loop/PB1 cross-over region be the number of Loop reads in those shared ASVs, or the number of PB1 reads in those shared ASVs? Alternatively, need to do read-by-read matching, but that's not our purpose here, not trying to delve into variation in abundance esimates of common ASVs by these methods...
-```
-library(VennDiagram)
-make.ft <- function(x) { sweep(x, 1, rowSums(x), "/") }
-ft.loop <- make.ft(st.loop); ft1.pb <- make.ft(st1.pb); ft2.pb <- make.ft(st2.pb)
-sq.loop <- getSequences(st.loop); sq.pb1 <- getSequences(st1.pb); sq.pb2 <- getSequences(st2.pb)
-sq.loop.pb1 <- intersect(sq.loop, sq.pb1)
-sq.loop.pb2 <- intersect(sq.loop, sq.pb2)
-sq.pb1.pb2 <- intersect(sq.pb1, sq.pb2)
-sq.all <- intersect(sq.loop.pb1, sq.pb2)
-grid.draw(draw.triple.venn(sum(ft.loop), sum(ft1.pb), sum(ft2.pb), 
-                 mean(sum(ft.loop[,sq.loop.pb1]), sum(ft1.pb[,sq.loop.pb1])),
-                 mean(sum(ft1.pb[,sq.pb1.pb2]), sum(ft2.pb[,sq.pb1.pb2])),
-                 mean(sum(ft.loop[,sq.loop.pb2]), sum(ft2.pb[,sq.loop.pb2])),
-                 mean(sum(ft.loop[,sq.all]), sum(ft1.pb[,sq.all]), sum(ft2.pb[,sq.all])),
-                 category = c("Loop", "PB1", "PB2"),
-                 fill = c("blue", "red", "green")))
-grid.newpage()
 ```
 
 A very high fraction of reads (>85\%) occur in ASVs identified consistently by both methods. How do things look at the whole community level, when we ordinate these three samples?
@@ -300,7 +268,7 @@ We'll use [the external program ssu-align(http://eddylab.org/software/ssu-align/
 
 First we'll run the program on an example sequence, to show its output:
 ```{r}
-ssu.exe <- "~/Desktop/ssu-align-0.1.1/src/ssu-align" # CHANGE ME...
+ssu.exe <- "~/Desktop/bin/ssu-align-0.1.1/src/ssu-align" # CHANGE ME...
 ssu.dir <- "/usr/local/share/ssu-align-0.1.1"
 export.str <- paste0('export SSUALIGNDIR="', ssu.dir, '";') # Prepend to all ssu-align calls
 # i <- 2 has just 1 sub, for testing
@@ -308,6 +276,7 @@ d1 <- dd[[1]]
 i <- 2
 bs <- d1$birth_subs[d1$birth_subs$clust==i,]
 sq <- d1$sequence[d1$clustering$birth_from[i]] # Positions are in birth (ref) seq
+if(!dir.exists("temp")) dir.create("temp")
 tf <- "temp/tempfile.fa"
 writeFasta(sq, tf)
 td <- "temp/tmp"
@@ -335,10 +304,6 @@ if(!gsub("U", "T", toupper(paste0(sqa, collapse=""))) == sq) { # TRUE
   stop("Aligned sequence not matching input sequence!")
 }
 sqcons <- refcons[keep] %in% caps
-#### !!!!
-## BIG QESTION: ARE THE BIRTH-SUB COORDINATES THE POSITION IN THE REF SEQ OR THE NEW SEQ?
-## ANSWER: They are the coords in the ref-seq, qual score is (correctly) from the right pos in the new seq tho
-#### !!!!
 bs$cons <- sqcons[bs$pos]
 table(sqcons)/sum(table(sqcons))
 table(bs$cons)/sum(table(bs$cons))
@@ -425,7 +390,6 @@ if(!file.exists(cons.rds)) {
 ```{r}
 cons <- readRDS(cons.rds)
 if(!all(sapply(cons, length) == sapply(dd2, function(x) nseqs(x)-1))) stop("Number of cons ASVs mismatch.")
-##system.time(con1 <- lapply(seq(2, nseqs(dd5[[1]])), get_subcons, dd=dd5[[1]]))
 ```
 
 Now to curate the SSU conservation data into a data.frame:
@@ -453,28 +417,33 @@ cons.all <- lapply(ii, get_subcons, dd=d1, return.all.pos=TRUE)
 sapply(cons.all, mean)
 ```
 
-Yep. Quite consistent, a bit over 80/% of the positiosn are conserved.
+Yep. Quite consistent, a bit over 80\% of the substitutions are in conserved positions.
 
-Now some exploration of the distribution of the conserved/variable ratio, as a function of the order of the ASVs (which reflects decreasing confidence by DADA2 they are not seqeuencing error) and by the abundance of the denoised ASVs:
+Now some exploration of the distribution of the ratio of substitutions in conserved and variable regions, as a function of the order of the ASVs (which reflects decreasing confidence by DADA2 they are not seqeuencing error) and by the abundance of the denoised ASVs:
 ```{r}
+# Use the median over our random sample as a plugin estimate for the fraction of conserved sites in each sequence
+raw.cons.frac <- median(sapply(cons.all, mean))
+raw.var.frac <- 1-raw.cons.frac
 clustdf <- do.call(rbind, clustdfs)
+clustdf$nnt <- nchar(clustdf$sequence)
+clustdf$frac.sub.cons <- clustdf$cons/(clustdf$nnt*raw.cons.frac)
+clustdf$frac.sub.var <- clustdf$vars/(clustdf$nnt*raw.var.frac)
 clustdf$logp <- log10(clustdf$birth_pval)
 clustdf$rlogp <- log10(clustdf$birth_pval + min(clustdf$birth_pval[clustdf$birth_pval>0]))
-clustdf$sample <- sapply(strsplit(clustdf$sample, "_"), `[`, 1)
+clustdf$sample <- paste("Sample", sapply(strsplit(clustdf$sample, "_"), `[`, 1))
 clustdf$abundance <- as.numeric(clustdf$abundance)
 theme_set(theme_bw())
 hist(clustdf$ncat, 100)
-p <- ggplot(data=clustdf, aes(x=cons, y=vars)) + 
-  xlab("Substitutions at Conserved Positions") + ylab("Substitutions at Variable Positions") +
-  geom_abline(col="grey80", intercept=0, slope=1) + 
-  geom_abline(col="red", intercept=0, slope=0.25, linetype="dashed")
+p <- ggplot(data=clustdf, aes(x=frac.sub.cons, y=frac.sub.var)) + 
+  xlab("Substitution Rate at Conserved Positions") + ylab("Substitution Rate at\nVariable Positions") +
+  geom_abline(col="grey80", intercept=0, slope=1) + theme(aspect.ratio=1)
 sz.scale <- scale_size_continuous(breaks=c("1"=1, "10"=10, "100"=100, "1000"=1000), name="ASV abundance")
 p + aes(size=abundance) + geom_point(alpha=0.2) + sz.scale
 p + aes(size=abundance) + geom_point(alpha=0.2) + sz.scale + scale_x_log10() + scale_y_log10()
 p4 <- p + aes(size=abundance) + geom_point(alpha=0.2) + facet_wrap(~sample) + sz.scale
 p4
-ggsave(file.path(path.fig, "Fecal_VarVsCons.pdf"), p4, width=7, heigh=3.2, units="in", useDingbats=FALSE)
-ggsave(file.path(path.fig, "Fecal_VarVsCons.png"), p4, width=7, heigh=3.2, units="in")
+ggsave(file.path(path.fig, "Fecal_VarVsCons.pdf"), p4, width=7, heigh=3, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Fecal_VarVsCons.png"), p4, width=7, heigh=3, units="in")
 #require(hexbin)
 #p + geom_hex()
 #p + geom_bin2d()

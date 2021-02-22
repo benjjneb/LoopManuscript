@@ -1,0 +1,74 @@
+# command:    ssu-cmsearch --hmm-cW 1.5 --no-null3 --noalign -T -1 --tab temp/tmp/tmp.tab --viterbi /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tempfile.fa
+# date:       Thu Feb 11 14:31:15 2021
+# num seqs:   1
+# dbsize(Mb): 0.002876
+#
+# Pre-search info for CM 1: archaea
+#
+# rnd  mod  alg  cfg   beta  bit sc cut
+# ---  ---  ---  ---  -----  ----------
+#   1  hmm  vit  loc      -       -1.00
+#
+# CM: archaea
+#                                    target coord   query coord                         
+#                          ----------------------  ------------                         
+# model name  target name       start        stop  start   stop    bit sc   E-value  GC%
+# ----------  -----------  ----------  ----------  -----  -----  --------  --------  ---
+  archaea     Sq1                  23        1359      1   1508    636.30         -   56
+  archaea     Sq1                 622         614      1   1508      1.18         -   44
+#
+# Post-search info for CM 1: archaea
+#
+# rnd  mod  alg  cfg   beta  bit sc cut  num hits  surv fract
+# ---  ---  ---  ---  -----  ----------  --------  ----------
+#   1  hmm  vit  loc      -       -1.00         2      0.4680
+#
+#    run time  (hr:min:sec)
+# -----------
+#    00:00:00
+#
+# Pre-search info for CM 2: bacteria
+#
+# rnd  mod  alg  cfg   beta  bit sc cut
+# ---  ---  ---  ---  -----  ----------
+#   1  hmm  vit  loc      -       -1.00
+#
+# CM: bacteria
+#                                    target coord   query coord                         
+#                          ----------------------  ------------                         
+# model name  target name       start        stop  start   stop    bit sc   E-value  GC%
+# ----------  -----------  ----------  ----------  -----  -----  --------  --------  ---
+  bacteria    Sq1                   1        1438      1   1582   1619.24         -   56
+#
+# Post-search info for CM 2: bacteria
+#
+# rnd  mod  alg  cfg   beta  bit sc cut  num hits  surv fract
+# ---  ---  ---  ---  -----  ----------  --------  ----------
+#   1  hmm  vit  loc      -       -1.00         1      0.5000
+#
+#    run time  (hr:min:sec)
+# -----------
+#    00:00:00
+#
+# Pre-search info for CM 3: eukarya
+#
+# rnd  mod  alg  cfg   beta  bit sc cut
+# ---  ---  ---  ---  -----  ----------
+#   1  hmm  vit  loc      -       -1.00
+#
+# CM: eukarya
+#                                    target coord   query coord                         
+#                          ----------------------  ------------                         
+# model name  target name       start        stop  start   stop    bit sc   E-value  GC%
+# ----------  -----------  ----------  ----------  -----  -----  --------  --------  ---
+  eukarya     Sq1                 831         872      1   1881     11.80         -   45
+#
+# Post-search info for CM 3: eukarya
+#
+# rnd  mod  alg  cfg   beta  bit sc cut  num hits  surv fract
+# ---  ---  ---  ---  -----  ----------  --------  ----------
+#   1  hmm  vit  loc      -       -1.00         1      0.0146
+#
+#    run time  (hr:min:sec)
+# -----------
+#    00:00:00

@@ -1,0 +1,5 @@
+#                                        best-matching model                  second-best model 
+#                         -------------------------------------------------  -------------------
+#     idx  sequence name  model name   beg   end    CM sc   struct   HMM sc  model name   HMM sc  HMMdiff
+# -------  -------------  ----------  ----  ----  -------  -------  -------  ----------  -------  -------
+        1  Sq1            bacteria       1  1438  1949.03   345.81  1619.24  archaea      636.30   982.94
