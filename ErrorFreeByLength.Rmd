@@ -70,11 +70,11 @@ tot <- cbind(reads.in=out[[1]][,1], all.out=sapply(nop24, function(f) length(get
 tot
 ```
 
-A pretty high fraction of full-length (i.e. FWD primer ot REV primer) 18SITS sequences in these data actually, more 2/3rds or more in each sample.
+A pretty high fraction of full-length (i.e. FWD primer ot REV primer) 18SITS sequences in these data actually, 2/3rds or more in each sample.
 
-Checking on seuqence complexities and overall quality.
+Checking on sequence complexities and overall quality.
 ```{r}
-plotComplexity(nop24) # AOK
+plotComplexity(nop24) 
 ```
 
 ```{r}
@@ -96,7 +96,7 @@ err <- learnErrors(filt, multi=TRUE, verbose=0)
 plotErrors(err, nominalQ=TRUE)
 ```
 
-Looks good (but not amazing, perhaps because DADA2 loess fitting could be improved).
+Looks good.
 
 Denoise:
 ```{r}
@@ -105,7 +105,7 @@ names(dd) <- sapply(strsplit(basename(filt), "_"), `[`, 1)
 dd
 ```
 
-Remarkably, just a single legitimate ASV is being inferred in all these samples (albeit with default rather than sensitive settings), save *A. oryzae* sample with 2 ASVs inferred. 
+Remarkably, just a single legitimate ASV is being inferred in all these samples (albeit with default rather than sensitive settings), save *A. oryzae* sample with 3 ASVs inferred. 
 
 ```{r}
 dd[[1]]$clustering$abundance
@@ -208,11 +208,13 @@ dfer <- rbind(data.frame(Length=nts, ErrorFree=exp(-nts*er.loop), Species=NA, Ev
 
 Combine the collated data into a publication figure showing the relationship between read-length and the error-free fraction.
 ```{r}
+#colnames(dfer)[colnames(dfer) == "Evidence"] <- "Sequence_Type"
 perrfree <- ggplot(data=dfer, aes(x=Length, y=ErrorFree, shape=Evidence, color=Technology)) + 
-  geom_line(linetype="dashed") +
   geom_point(data=dfp) + ylim(0, NA) + theme_bw() + 
-  scale_shape_manual(values=c("Fungal 18S-ITS"="triangle", "Genomic"="square", "Zymo 16S"="circle")) +
-  guides(color = guide_legend(order = 1), shape = guide_legend(order = 0)) +
+  scale_shape_manual(name="Sequence Type",
+                     values=c("Fungal 18S-ITS"="triangle", "Genomic"="square", "Zymo 16S"="circle")) +
+  guides(color = guide_legend(order = 1, override.aes = list(linetype="blank")), shape = guide_legend(order = 0)) +
+  geom_line(linetype="dashed") +
   ylab("Fraction Error-free Reads") + xlab("Amplicon Length")
 perrfree
 ggsave(file.path(path.fig, "perrfree.pdf"), perrfree, 
