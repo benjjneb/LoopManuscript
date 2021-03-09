@@ -12,6 +12,8 @@ Load libraries, set the working directory to the location of this Rmarkdown file
 library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.15.4 or later
 library(Biostrings, quietly=TRUE)
 library(ShortRead, quietly=TRUE)
+library(DECIPHER, quietly=TRUE)
+library(ggmsa, quitely=TRUE) # On CRAN, also needs BioC treeio package
 library(ggplot2, quietly=TRUE)
 library(reshape2, quietly=TRUE)
 set.seed(100)
@@ -294,7 +296,8 @@ spec.nice <- c("enterocolitica"="Y. enterocolitica",
                "Campylobacter"="Campylobacter sp.")
 tt[!tt[,"Species"] %in% names(spec.nice),"Species"] <- NA # Drop non-pathogen species
 tt[!is.na(tt[,"Species"]), "Species"] <- spec.nice[tt[!is.na(tt[,"Species"]), "Species"]]
-suppressWarnings(ftp <- colsum(ft, group=tt[,"Species"])) # Throws a warning because of the NAs in species, this is OK
+suppressWarnings(ftp <- t(rowsum(t(ft), group=tt[,"Species"]))) 
+# Throws a warning because of the NAs in species, this is OK
 ftp <- ftp[,colnames(ftp) %in% spec.nice]
 ftp
 ```
@@ -328,22 +331,12 @@ uncolname(st[,sq.Cperf])
 We are interested ine visualizing the "ribotype" of the strain in Sample GT10 that spans *C. perfringens* ASVs 1-9, with a 2:1(x8) ratio of alleles consistent with the 10 copies of the 16S rRNA gene in *C. perfringens* genomes.
 
 ```{r}
-library(DECIPHER)
-library(ggmsa) # On CRAN, also needs BioC treeio package
 sq.Cpstrain <- sq.Cperf[1:9]
 dna.Cpstrain <- DNAStringSet(sq.Cpstrain)
 rna.Cpstrain <- DNAStringSet(dna.Cpstrain)
 aln <- AlignSeqs(rna.Cpstrain) # align with RNA secondary structure
 names(aln) <- paste0("Cperf", seq_along(sq.Cpstrain))
 aln
-```
-
-```{r}
-## Testing ggmsa nucleotide color schemes:
-# clrs <- c('Clustal', 'Chemistry_NT', 'Shapely_NT', 'Zappo_NT', 'Taylor_NT')
-# for(clr in clrs) {
-#  print(ggmsa(aln, 100, 200, font = NULL, color = clr))
-#}
 ```
 
 Scannings 100nt chunks to see where some diffs are for the publication plot:
@@ -365,6 +358,22 @@ pmsa <- ggmsa(aln, 137-27, 242-27, font = NULL, color = 'Shapely_NT') +
 pmsa
 ggsave(file.path(path.fig, "Meat_CPerf_MSA.pdf"), pmsa, width=6, height=1.2, units="in", useDingbats=FALSE)
 ggsave(file.path(path.fig, "Meat_CPerf_MSA.png"), pmsa, width=6, height=1.2, units="in")
+```
+
+Add the abundances as a column to the right:
+```{r}
+df.ab <- data.frame(Name=factor(names(aln), levels=sort(names(aln), decreasing=TRUE)), 
+                    Sequence=sq.Cpstrain, 
+                    Abundance=st["GT10_contig_list_trimmed.fq", sq.Cpstrain])
+pab <- ggplot(df.ab, aes(x=Abundance, y=Name)) +
+  geom_col() +
+  theme_minimal() +
+  theme(panel.grid=element_blank()) +
+  theme(axis.text=element_blank()) +
+  ylab("") + xlab("Relative\nAbundance")
+pab
+ggsave(file.path(path.fig, "Meat_CPerf_MSA_ab.pdf"), pab, width=1, height=1.2, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Meat_CPerf_MSA_ab.png"), pab, width=1, height=1.2, units="in")
 ```
 
 
