@@ -214,6 +214,7 @@ tab.pb1.pb2/totReads(st1.pb, st2.pb)
 
 A very high fraction of reads (>85\%) occur in ASVs identified consistently by both methods. How do things look at the whole community level, when we ordinate these three samples?
 
+Combine the sequence tables together:
 ```{r}
 st.loop.lab <- st.loop
 rownames(st.loop.lab) <- gsub("$", ".loop", rownames(st.loop.lab))
@@ -223,6 +224,10 @@ st2.pb.lab <- st2.pb
 rownames(st2.pb.lab) <- gsub("$", ".pb2", rownames(st2.pb.lab))
 st.both.lab <- mergeSequenceTables(st.loop.lab, st1.pb.lab, st2.pb.lab)
 ft.both.lab <- sweep(st.both.lab, 1, rowSums(st.both.lab), "/")
+```
+
+Perform ordination:
+```{r}
 bc <- vegdist(ft.both.lab, "bray")
 mds <- pcoa(bc)
 df <- data.frame(mds$vectors)
@@ -243,9 +248,11 @@ labdf <- df[df$Technology=="LoopSeq",]
 labdf$Axis.1 <- 0.8*labdf$Axis.1 # pull labels towards middle of plot
 labdf$Axis.2 <- 0.8*labdf$Axis.2
 ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black")
-ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.pdf"), ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.pdf"), 
+       ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
        width=5, height=3, units="in", useDingbats=FALSE)
-ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.png"), ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord.png"), 
+       ppb + geom_point(shape="x", size=6) + geom_label(data=labdf, color="black"), 
        width=5, height=3, units="in")
 ```
 
@@ -259,6 +266,29 @@ as.matrix(bc)[df$Sample=="R9.4", df$Sample=="R9.4"]
 ```
 
 In Sample R3.1 the PacBio technical replicates are highly similar, but in the other two samples the Loop measurement is about as similar to each PacBio technical replicate as the PacBio technical replicates are to each other!
+
+Also testing Jaccard distance to ensure this pattern is not entirely driven by high abundance ASVs.
+```{r}
+jc <- vegdist(ft.both.lab, "jaccard")
+mds.jc <- pcoa(jc)
+df.jc <- df # Just replace the vectors with the new jaccard derived numbers
+df.jc[,paste0("Axis.", seq(8))] <- data.frame(mds.jc$vectors)
+ppj <- ggplot(data=df.jc, aes(x=Axis.1, y=Axis.2, label=Sample, color=Technology)) + theme_bw() + 
+  scale_color_manual(values=tech.color.scale)
+ppj + geom_text(alpha=0.8)
+labdf.jc <- df.jc[df.jc$Technology=="LoopSeq",]
+labdf.jc$Axis.1 <- 0.8*labdf.jc$Axis.1 # pull labels towards middle of plot
+labdf.jc$Axis.2 <- 0.8*labdf.jc$Axis.2
+ppj + geom_point(shape="x", size=6) + geom_label(data=labdf.jc, color="black")
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord_jaccard.pdf"), 
+       ppj + geom_point(shape="x", size=6) + geom_label(data=labdf.jc, color="black"), 
+       width=5, height=3, units="in", useDingbats=FALSE)
+ggsave(file.path(path.fig, "Fecal_LoopVsPacBio_ord_jaccard.png"), 
+       ppj + geom_point(shape="x", size=6) + geom_label(data=labdf.jc, color="black"), 
+       width=5, height=3, units="in")
+```
+
+Exact same qualitative patterns with Jaccard distance as well.
 
 ## Demonstration of LoopSeq Accuracy using 16S conservation patterns
 
