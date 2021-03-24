@@ -4,7 +4,7 @@
 # Freely distributed under the BSD open source license.
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # command: ssu-align -f temp/tempfile.fa temp/tmp
-# date:    Thu Feb 11 14:31:15 2021
+# date:    Tue Mar 16 12:29:11 2021
 #
 # Validating input sequence file ... done.
 #
@@ -43,8 +43,8 @@
 #
 # stage      num seqs  seq/sec  seq/sec/model    nucleotides    nt/sec
 # ---------  --------  -------  -------------  -------------  --------
-  search            1    2.675          0.892           1438    3847.3
-  alignment         1    1.912          1.912           1438    2749.1
+  search            1    2.633          0.878           1438    3786.2
+  alignment         1    1.846          1.846           1438    2653.9
 #
 #
 # List of executed commands saved in:     tmp.ssu-align.log.
@@ -52,8 +52,8 @@
 #
 # All output files created in directory ./temp/tmp/
 #
-# CPU time (search):     00:00:00.37  (hh:mm:ss)
-# CPU time (alignment):  00:00:00.52  (hh:mm:ss)
-# CPU time (total):      00:00:01.05  (hh:mm:ss)
+# CPU time (search):     00:00:00.38  (hh:mm:ss)
+# CPU time (alignment):  00:00:00.54  (hh:mm:ss)
+# CPU time (total):      00:00:01.06  (hh:mm:ss)
 #
 # SSU-ALIGN-SUCCESS

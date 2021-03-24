@@ -1,7 +1,6 @@
 ---
 title: "Loop_Callahan16S"
 author: "BJC"
-date: "11/4/2019"
 output: html_document
 ---
 

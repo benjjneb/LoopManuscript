@@ -1,7 +1,6 @@
 ---
 title: "ErrorFreeByLength"
 author: "BJC"
-date: "7/3/2020"
 output: html_document
 ---
 

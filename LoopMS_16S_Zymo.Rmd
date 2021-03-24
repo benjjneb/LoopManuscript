@@ -1,7 +1,6 @@
 ---
 title: "Evaluationg LoopSeq 16S on Zymo Mock"
 author: "BJC"
-date: "2021-02-02"
 output: html_document
 ---
 
@@ -148,8 +147,6 @@ dada2:::pfasta(asvs, id=names(asvs))
 ## 
 ## dada2:::pfasta(asvs, id=paste(tax[,"Genus"], seq(nrow(tax))))
 ## BLAST fasta against nt excluding uncultured/environmental sequences: https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastn&PAGE_TYPE=BlastSearch&BLAST_SPEC=&LINK_LOC=blasttab&LAST_PAGE=blastn
-fn.zymo.ssu <- ""
-sapply(asvs, )
 ```
 
 Results of BLAST search on Feb 2, 2020 are recorded.

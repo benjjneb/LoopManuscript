@@ -1,7 +1,6 @@
 ---
 title: "Evaluationg LoopSeq 16S on Rinsate from Retail Meat Samples"
 author: "BJC"
-date: "4/13/2020"
 output: html_document
 ---
 
@@ -13,7 +12,7 @@ library(dada2, quietly=TRUE); packageVersion("dada2") # Should be 1.15.4 or late
 library(Biostrings, quietly=TRUE)
 library(ShortRead, quietly=TRUE)
 library(DECIPHER, quietly=TRUE)
-library(ggmsa, quitely=TRUE) # On CRAN, also needs BioC treeio package
+library(ggmsa, quietly=TRUE) # On CRAN, also needs BioC treeio package
 library(ggplot2, quietly=TRUE)
 library(reshape2, quietly=TRUE)
 set.seed(100)

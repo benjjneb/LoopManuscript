@@ -1,5 +1,5 @@
 # command:    ssu-cmsearch --hmm-cW 1.5 --no-null3 --noalign -T -1 --tab temp/tmp/tmp.tab --viterbi /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tempfile.fa
-# date:       Thu Feb 11 14:31:15 2021
+# date:       Tue Mar 16 12:29:11 2021
 # num seqs:   1
 # dbsize(Mb): 0.002876
 #

@@ -1,7 +1,6 @@
 ---
 title: "Evaluationg LoopSeq 16S on Human Fecal Samples"
 author: "BJC"
-date: "2021-02-11"
 output: html_document
 ---
 

@@ -6,7 +6,7 @@ Returned:       0
 # Freely distributed under the BSD open source license.
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # command: ssu-align -f temp/tempfile.fa temp/tmp
-# date:    Thu Feb 11 14:31:15 2021
+# date:    Tue Mar 16 12:29:11 2021
 
 Printing global hask key as read from ssu.pm:
 
@@ -43,60 +43,60 @@ Global hash key: ps2pdf               value: ps2pdf
 Global hash key: ssu-align            value: ssu-align
 Global hash key: ssu-merge            value: ssu-merge
 
-Executing:      ssu-esl-seqstat -h > /dev/null  2> temp/ssutmp0erraa54184
+Executing:      ssu-esl-seqstat -h > /dev/null  2> temp/ssutmp0erraa40498
 Returned:       0
 Output (STDOUT) sent to /dev/null.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp0erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp0erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-cmsearch -h > /dev/null  2> temp/ssutmp1erraa54184
+Executing:      ssu-cmsearch -h > /dev/null  2> temp/ssutmp1erraa40498
 Returned:       0
 Output (STDOUT) sent to /dev/null.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp1erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp1erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-esl-sfetch -h > /dev/null  2> temp/ssutmp2erraa54184
+Executing:      ssu-esl-sfetch -h > /dev/null  2> temp/ssutmp2erraa40498
 Returned:       0
 Output (STDOUT) sent to /dev/null.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp2erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp2erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-esl-reformat -h > /dev/null  2> temp/ssutmp3erraa54184
+Executing:      ssu-esl-reformat -h > /dev/null  2> temp/ssutmp3erraa40498
 Returned:       0
 Output (STDOUT) sent to /dev/null.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp3erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp3erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-cmalign -h > /dev/null  2> temp/ssutmp4erraa54184
+Executing:      ssu-cmalign -h > /dev/null  2> temp/ssutmp4erraa40498
 Returned:       0
 Output (STDOUT) sent to /dev/null.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp4erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp4erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-esl-seqstat --rna -a temp/tempfile.fa > temp/tmp/tmp.seqstat  2> temp/ssutmp5erraa54184
+Executing:      ssu-esl-seqstat --rna -a temp/tempfile.fa > temp/tmp/tmp.seqstat  2> temp/ssutmp5erraa40498
 Returned:       0
 Output (STDOUT) saved in file temp/tmp/tmp.seqstat.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp5erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp5erraa40498) with perl's unlink function ... done.
 
 About to remove file (temp/tmp/tmp.seqstat) with perl's unlink function ... done.
 
-Executing:      ssu-cmsearch --hmm-cW 1.5 --no-null3 --noalign -T -1 --tab temp/tmp/tmp.tab --viterbi /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tempfile.fa > temp/tmp/tmp.cmsearch  2> temp/ssutmp6erraa54184
+Executing:      ssu-cmsearch --hmm-cW 1.5 --no-null3 --noalign -T -1 --tab temp/tmp/tmp.tab --viterbi /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tempfile.fa > temp/tmp/tmp.cmsearch  2> temp/ssutmp6erraa40498
 Returned:       0
 Output (STDOUT) saved in file temp/tmp/tmp.cmsearch.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp6erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp6erraa40498) with perl's unlink function ... done.
 
 About to remove file (temp/tmp/tmp.cmsearch) with perl's unlink function ... done.
 
-Executing:      ssu-esl-sfetch --index temp/tempfile.fa > temp/ssutmp7outaa54184  2> temp/ssutmp7erraa54184
+Executing:      ssu-esl-sfetch --index temp/tempfile.fa > temp/ssutmp7outaa40498  2> temp/ssutmp7erraa40498
 Returned:       0
 Output (STDOUT): 
 Creating SSI index for temp/tempfile.fa...    done.
@@ -105,31 +105,31 @@ SSI index written to file temp/tempfile.fa.ssi
 
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp7outaa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp7outaa40498) with perl's unlink function ... done.
 
-About to remove file (temp/ssutmp7erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp7erraa40498) with perl's unlink function ... done.
 
-Executing:      ssu-esl-sfetch -Cf temp/tempfile.fa temp/tmp/tmp.bacteria.sfetch | ssu-esl-reformat -o temp/tmp/tmp.bacteria.fa --informat fasta -r fasta - > temp/ssutmp8outaa54184  2> temp/ssutmp8erraa54184
+Executing:      ssu-esl-sfetch -Cf temp/tempfile.fa temp/tmp/tmp.bacteria.sfetch | ssu-esl-reformat -o temp/tmp/tmp.bacteria.fa --informat fasta -r fasta - > temp/ssutmp8outaa40498  2> temp/ssutmp8erraa40498
 Returned:       0
 Output (STDOUT): ***NONE***
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp8outaa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp8outaa40498) with perl's unlink function ... done.
 
-About to remove file (temp/ssutmp8erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp8erraa40498) with perl's unlink function ... done.
 
 About to remove file (temp/tmp/tmp.bacteria.sfetch) with perl's unlink function ... done.
 
-Executing:      ssu-cmalign --cm-name bacteria --mxsize 4096 --no-null3 --sub --ifile temp/tmp/tmp.bacteria.ifile -o temp/tmp/tmp.bacteria.stk /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tmp/tmp.bacteria.fa > temp/tmp/tmp.bacteria.cmalign  2> temp/ssutmp9erraa54184
+Executing:      ssu-cmalign --cm-name bacteria --mxsize 4096 --no-null3 --sub --ifile temp/tmp/tmp.bacteria.ifile -o temp/tmp/tmp.bacteria.stk /usr/local/share/ssu-align-0.1.1/ssu-align-0p1.cm temp/tmp/tmp.bacteria.fa > temp/tmp/tmp.bacteria.cmalign  2> temp/ssutmp9erraa40498
 Returned:       0
 Output (STDOUT) saved in file temp/tmp/tmp.bacteria.cmalign.
 Output (STDERR): ***NONE***
 
-About to remove file (temp/ssutmp9erraa54184) with perl's unlink function ... done.
+About to remove file (temp/ssutmp9erraa40498) with perl's unlink function ... done.
 
 About to remove file (temp/tmp/tmp.nomatch) with perl's unlink function ... done.
 
 About to remove file (temp/tempfile.fa.ssi) with perl's unlink function ... done.
 
-Thu Feb 11 14:31:16 EST 2021
+Tue Mar 16 12:29:12 EDT 2021
 Darwin phpmb13.attlocal.net 18.7.0 Darwin Kernel Version 18.7.0: Mon Feb 10 21:08:45 PST 2020; root:xnu-4903.278.28~1/RELEASE_X86_64 x86_64
